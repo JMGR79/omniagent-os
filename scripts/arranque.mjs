@@ -28,6 +28,7 @@ async function conectar() {
     const c = new pg.Client(db);
     try { await c.connect(); return c; } catch (e) {
       log(`Base de datos no disponible (intento ${i}/30): ${e.message}`);
+      if (/password authentication failed/i.test(e.message)) log('→ La contraseña de la base de datos no es correcta: copia en Render el campo «Password» (o la «Internal Database URL» completa) en DB_POSTGRESDB_PASSWORD.');
       await c.end().catch(() => {});
       await new Promise((r) => setTimeout(r, 4000));
     }

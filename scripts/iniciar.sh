@@ -8,5 +8,6 @@ if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export N8N_HOST="${N8N_HOST:-$RENDER_EXTERNAL_HOSTNAME}"
   export N8N_PROTOCOL="${N8N_PROTOCOL:-https}"
 fi
+eval "$(node /opt/omni/db-env.mjs)"
 node /opt/omni/arranque.mjs
 exec n8n start
