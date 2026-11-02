@@ -1,0 +1,197 @@
+{
+  "id": "omniSYS00errores",
+  "name": "SYS-00 Debugger global",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e0c52f49-a354-5d8a-ad63-8c01e956805d",
+      "name": "Error en un flujo",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $input.first().json;\nconst msg = String(e.execution?.error?.message || e.trigger?.error?.message || 'Error desconocido');\n// Errores que no se arreglan reintentando: credenciales, permisos, presupuesto, datos.\nconst noReintentable = /(No autorizado|credential|credencial|permission|permiso|Presupuesto|401|403|invalid|no válido)/i.test(msg);\nreturn [{ json: { params: [e.workflow?.name || 'desconocido', String(e.workflow?.id || ''), String(e.execution?.id || ''),\n  e.execution?.lastNodeExecuted || '', msg.slice(0, 2000), noReintentable ? 'no' : 'si'],\n  aviso: '🛠 Error en ' + (e.workflow?.name || 'un flujo') + ' · nodo «' + (e.execution?.lastNodeExecuted || '?') + '»\\n' + msg.slice(0, 800) +\n    (noReintentable ? '\\n\\nNo se reintentará solo: revisa la configuración.' : '\\n\\nSe reintentará automáticamente.') } }];\n"
+      },
+      "id": "d6c2fc7a-44bd-5015-b6f1-ef9b3c075f78",
+      "name": "Extraer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO incidentes (workflow, workflow_id, ejecucion_id, nodo, error, proximo_reintento)\nVALUES ($1, $2, nullif($3, ''), $4, $5, CASE WHEN $6 = 'si' THEN now() + interval '5 minutes' END) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "8caa46cb-7c3d-5a7b-a751-621dae6584cf",
+      "name": "Guardar incidente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\n\nreturn avisoTelegram($('Extraer').first().json.aviso);\n"
+      },
+      "id": "cb902b88-cb4f-5468-812d-2f3fd185abfb",
+      "name": "Aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -90
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -90
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        90
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Error en un flujo": {
+      "main": [
+        [
+          {
+            "node": "Extraer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer": {
+      "main": [
+        [
+          {
+            "node": "Guardar incidente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar incidente": {
+      "main": [
+        [
+          {
+            "node": "Aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

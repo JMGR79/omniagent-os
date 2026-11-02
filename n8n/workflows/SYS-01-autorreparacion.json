@@ -1,0 +1,220 @@
+{
+  "id": "omniSYS01reintnt",
+  "name": "SYS-01 Autorreparación",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "be8e5be1-076a-529d-a9d7-aad5b40c5333",
+      "name": "Cada 10 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE incidentes SET intentos = intentos + 1, proximo_reintento = now() + (intentos + 1) * interval '30 minutes'\nWHERE id IN (SELECT id FROM incidentes WHERE resuelto_en IS NULL AND NOT autorreparado AND ejecucion_id IS NOT NULL\n             AND proximo_reintento <= now() AND intentos < 3 ORDER BY proximo_reintento LIMIT 5 FOR UPDATE SKIP LOCKED)\nRETURNING id, ejecucion_id, workflow",
+        "options": {}
+      },
+      "id": "a2618b3e-af92-5df4-8e94-616f2660da25",
+      "name": "Incidentes a reintentar",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.N8N_API_KEY) return [];\nreturn $input.all().filter((i) => i.json.ejecucion_id).map((i) => ({ json: i.json, pairedItem: i.pairedItem }));\n"
+      },
+      "id": "922be22a-f00b-5afe-970c-9e85c350656a",
+      "name": "¿Hay API?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.N8N_API_URL || 'http://localhost:5678') + '/api/v1/executions/' + $json.ejecucion_id + '/retry' }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-KEY",
+              "value": "={{ $env.N8N_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ loadWorkflow: true }) }}"
+      },
+      "id": "fa0d858f-f607-5cae-8ceb-5fc6fe4dc6f4",
+      "name": "Reintentar ejecución",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inc = $('¿Hay API?').item.json;\nconst ok = !$json.error && ($json.status === 'success' || $json.finished === true);\nreturn { json: { params: [inc.id, ok ? 'si' : 'no'] } };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "c2ec75a7-fc25-5e94-8293-a9b617b5325f",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE incidentes SET autorreparado = ($2 = 'si'), resuelto_en = CASE WHEN $2 = 'si' THEN now() END WHERE id = $1::uuid RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "30eacd05-6172-56c8-940c-aa27a04d24d7",
+      "name": "Marcar",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "1d43334b-850a-5f3d-b403-f7e1ccc7f761",
+      "name": "Ejecutar ahora",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Cada 10 min": {
+      "main": [
+        [
+          {
+            "node": "Incidentes a reintentar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Incidentes a reintentar": {
+      "main": [
+        [
+          {
+            "node": "¿Hay API?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay API?": {
+      "main": [
+        [
+          {
+            "node": "Reintentar ejecución",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reintentar ejecución": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado": {
+      "main": [
+        [
+          {
+            "node": "Marcar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "Incidentes a reintentar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

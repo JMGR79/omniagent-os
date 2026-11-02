@@ -1,0 +1,401 @@
+{
+  "id": "omniMSG01emailld",
+  "name": "MSG-01 Responder emails de leads",
+  "nodes": [
+    {
+      "parameters": {
+        "mailbox": "OmniAgent-Leads",
+        "postProcessAction": "read",
+        "format": "simple",
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]"
+        }
+      },
+      "id": "03f51149-268f-5061-b2f5-7e438f56512f",
+      "name": "Email nuevo",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "imap": {
+          "id": "omniGmailImap001",
+          "name": "Gmail IMAP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const propio = String($env.GMAIL_USUARIO || $env.EMAIL_DUENO || '').toLowerCase();\nconst out = [];\nfor (const it of $input.all()) {\n  const e = it.json;\n  const deTxt = String(e.from || '');\n  const m = deTxt.match(/<([^>]+)>/);\n  const email = (m ? m[1] : deTxt).trim().toLowerCase();\n  const nombre = m ? deTxt.replace(/<[^>]+>/, '').replace(/\"/g, '').trim() : '';\n  if (!email.includes('@') || email === propio) continue;\n  if (/(no-?reply|mailer-daemon|postmaster|notifications?@|newsletter|bounce)/i.test(email)) continue;\n  const cuerpo = String(e.textPlain || e.text || e.textHtml || '').replace(/<[^>]+>/g, ' ').slice(0, 6000);\n  out.push({ json: { email, nombre, asunto: String(e.subject || '(sin asunto)'), cuerpo, message_id: e.messageId || e['message-id'] || '' } });\n}\nreturn out;\n"
+      },
+      "id": "d0a89825-f831-5e9b-bfbc-97c55cc23bc8",
+      "name": "Filtrar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO contactos (email, nombre, origen, ultimo_contacto) VALUES ($1, nullif($2, ''), 'email', now())\nON CONFLICT (email) DO UPDATE SET ultimo_contacto = now(), nombre = coalesce(contactos.nombre, excluded.nombre)\nRETURNING id, score, (SELECT coalesce(string_agg('Cliente: ' || left(m.entrante, 300) || E'\\nNosotros: ' || left(coalesce(m.respuesta, ''), 300), E'\\n---\\n'), '')\n                      FROM (SELECT * FROM mensajes WHERE contacto_id = contactos.id ORDER BY creado_en DESC LIMIT 3) m) AS historial",
+        "options": {
+          "queryReplacement": "={{ [$json.email, $json.nombre] }}"
+        }
+      },
+      "id": "5cd7151d-14c5-5653-ba1f-45690ceede2e",
+      "name": "Contacto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((it, i) => {\n  const e = $('Filtrar').all()[i].json;\n  const c = it.json;\n  const input = 'Ha llegado este email a EstrategIA Digital 3.0.\\nDe: ' + (e.nombre || e.email) + '\\nAsunto: ' + e.asunto + '\\n\\n' + e.cuerpo +\n    (c.historial ? '\\n\\nConversación anterior:\\n' + c.historial : '') +\n    '\\n\\nResponde SOLO JSON: {\"respuesta\":\"email de respuesta en texto plano, firmado como Asistente de IA de EstrategIA Digital 3.0\",\"requiere_humano\":false,\"motivo\":\"\",\"score\":0,\"intencion\":\"info|compra|soporte|queja|spam|otro\"}' +\n    '\\nPon requiere_humano=true si hay intención clara de compra, presupuesto, queja, tema legal, datos personales sensibles o si no sabes la respuesta. Si es spam, intencion=spam y respuesta vacía.';\n  return { json: { agente_id: 3, input, max_tokens: 1500, origen: 'MSG-01' } };\n});\n"
+      },
+      "id": "a8724c71-3ecd-5b75-b5dc-17188e86ebb0",
+      "name": "Encargo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "e585b646-e16a-5725-8036-abe0f82dc80a",
+      "name": "Agente de conversación",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nreturn $input.all().map((it, i) => {\n  const e = $('Filtrar').all()[i].json;\n  const c = $('Contacto').all()[i].json;\n  let r;\n  try { r = jsonDeTexto(it.json.respuesta); } catch (err) { r = { respuesta: '', requiere_humano: true, motivo: 'Respuesta del agente no válida', score: 0, intencion: 'otro' }; }\n  const spam = r.intencion === 'spam';\n  const auto = String($env.MODO_AUTOMATICO || 'true') === 'true';\n  const humano = !spam && (!!r.requiere_humano || !auto || !String(r.respuesta || '').trim());\n  const pie = '\\n\\n—\\nEste mensaje lo ha escrito el asistente de IA de EstrategIA Digital 3.0. Si prefieres hablar con una persona, responde con la palabra «persona».';\n  return { json: { enviar: !humano && !spam, humano, spam, email: e.email, asunto: /^re:/i.test(e.asunto) ? e.asunto : 'Re: ' + e.asunto,\n    respuesta: String(r.respuesta || '').trim() + pie, motivo: r.motivo || '', score: Math.max(0, Math.min(100, Number(r.score) || 0)),\n    intencion: r.intencion || 'otro', contacto_id: c.id, entrante: e.cuerpo.slice(0, 4000) } };\n});\n"
+      },
+      "id": "0742c515-dc11-5f95-8c74-b69161ec94a8",
+      "name": "Decidir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b1c2d3e4-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.enviar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c6413bd3-1042-5110-ae9b-8ea7b9b25779",
+      "name": "¿Responder solo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ 'EstrategIA Digital 3.0 <' + ($env.GMAIL_USUARIO || $env.EMAIL_DUENO) + '>' }}",
+        "toEmail": "={{ $json.email }}",
+        "subject": "={{ $json.asunto }}",
+        "emailFormat": "text",
+        "text": "={{ $json.respuesta }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a925c740-8696-55ed-ab42-6de1473d0462",
+      "name": "Enviar respuesta",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1540,
+        -150
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "omniGmailSmtp001",
+          "name": "Gmail SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH m AS (INSERT INTO mensajes (canal, contacto_id, entrante, respuesta, estado)\n           VALUES ('email', $1::uuid, $2, CASE WHEN $3 = 'respondido' THEN $4 END, $3) RETURNING id)\nUPDATE contactos SET score = greatest(score, $5::int), estado = CASE WHEN $6 = 'compra' THEN 'caliente' WHEN $6 = 'spam' THEN 'spam' ELSE estado END\nWHERE id = $1::uuid RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [$json.contacto_id, $json.entrante, $json.spam ? 'ignorado' : ($json.humano ? 'pendiente_humano' : 'respondido'), $json.respuesta, $json.score, $json.intencion] }}"
+        }
+      },
+      "id": "09796bb8-6add-55ac-85d4-bdffaa5790a5",
+      "name": "Registrar conversación",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1320,
+        150
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\n\nconst out = [];\nfor (const it of $('Decidir').all()) {\n  const d = it.json;\n  if (d.humano) out.push(...avisoTelegram('📩 Email que necesita a una persona (' + d.intencion + ', score ' + d.score + ')\\nDe: ' + d.email + '\\nMotivo: ' + d.motivo + '\\n\\n' + d.entrante.slice(0, 1500)));\n  else if (d.score >= 70) out.push(...avisoTelegram('🔥 Lead caliente respondido (score ' + d.score + '): ' + d.email));\n}\nreturn out;\n"
+      },
+      "id": "223af9f6-ef15-5542-8f0c-415fb8a85057",
+      "name": "Avisar al dueño",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        60
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        240
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Email nuevo": {
+      "main": [
+        [
+          {
+            "node": "Filtrar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar": {
+      "main": [
+        [
+          {
+            "node": "Contacto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contacto": {
+      "main": [
+        [
+          {
+            "node": "Encargo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encargo": {
+      "main": [
+        [
+          {
+            "node": "Agente de conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente de conversación": {
+      "main": [
+        [
+          {
+            "node": "Decidir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir": {
+      "main": [
+        [
+          {
+            "node": "¿Responder solo?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Responder solo?": {
+      "main": [
+        [
+          {
+            "node": "Enviar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar conversación": {
+      "main": [
+        [
+          {
+            "node": "Avisar al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar al dueño": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

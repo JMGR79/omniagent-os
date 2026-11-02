@@ -1,0 +1,306 @@
+{
+  "id": "omniRPT01resumen",
+  "name": "RPT-01 Resumen diario",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "34982000-0d77-5b88-a895-fd83fe711d3b",
+      "name": "Cada día 20:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT count(*) FROM publicaciones WHERE publicado_en::date = current_date)::int AS publicadas_hoy,\n  (SELECT coalesce(string_agg(canal || ': ' || n, ', '), '—') FROM (SELECT canal, count(*) n FROM publicaciones WHERE publicado_en::date = current_date GROUP BY canal) c) AS por_canal,\n  (SELECT count(*) FROM piezas WHERE estado = 'pendiente_aprobacion')::int AS pendientes,\n  (SELECT count(*) FROM piezas WHERE estado = 'en_cola')::int AS en_cola,\n  (SELECT coalesce(string_agg('· ' || canal || ' — ' || coalesce(tema, left(brief, 60)), E'\\n'), '') FROM (SELECT * FROM piezas WHERE estado = 'requiere_video' ORDER BY creado_en DESC LIMIT 5) v) AS videos,\n  (SELECT count(*) FROM contactos WHERE fecha_alta::date = current_date)::int AS leads_hoy,\n  (SELECT count(*) FROM mensajes WHERE creado_en::date = current_date AND estado = 'respondido')::int AS respondidos,\n  (SELECT count(*) FROM mensajes WHERE estado = 'pendiente_humano' AND creado_en > now() - interval '3 days')::int AS para_ti,\n  (SELECT round(coalesce(sum(coste_eur), 0), 2) FROM ejecuciones_agente WHERE creado_en::date = current_date) AS coste_ia,\n  (SELECT count(*) FROM incidentes WHERE resuelto_en IS NULL AND NOT autorreparado)::int AS incidentes,\n  (SELECT coalesce(string_agg('· ' || canal || ': ' || left(error, 120), E'\\n'), '') FROM (SELECT * FROM piezas WHERE estado = 'error' AND actualizado_en::date = current_date LIMIT 5) e) AS errores",
+        "options": {}
+      },
+      "id": "30aab867-ab62-5613-85bb-a25d7b508eb2",
+      "name": "Datos del día",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst fecha = new Date().toLocaleDateString('es-ES', { timeZone: 'Europe/Madrid', weekday: 'long', day: 'numeric', month: 'long' });\nconst lineas = [\n  'Resumen de OmniAgent · EstrategIA Digital 3.0 · ' + fecha, '',\n  '📣 Publicadas hoy: ' + d.publicadas_hoy + ' (' + d.por_canal + ')',\n  '⏳ En cola: ' + d.en_cola + ' · Para aprobar: ' + d.pendientes,\n  '👤 Leads nuevos: ' + d.leads_hoy + ' · Emails respondidos por la IA: ' + d.respondidos + ' · Esperan tu respuesta: ' + d.para_ti,\n  '💶 Coste de IA hoy: ' + d.coste_ia + ' €',\n  '🛠 Incidentes abiertos: ' + d.incidentes,\n];\nif (d.videos) lineas.push('', '🎬 Guiones de vídeo pendientes de grabar:', d.videos);\nif (d.errores) lineas.push('', '⚠ Errores de publicación de hoy:', d.errores);\nconst texto = lineas.join('\\n');\nreturn [{ json: { tipo: 'email', texto } }, { json: { tipo: 'aviso', texto } }];\n"
+      },
+      "id": "f09539be-9197-5cae-8edf-0ba1ed87822f",
+      "name": "Redactar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b1c2d3e4-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "email",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e0298d5d-c8c9-5b76-8f4d-4cdaed75c82b",
+      "name": "¿Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ 'OmniAgent <' + ($env.GMAIL_USUARIO || $env.EMAIL_DUENO) + '>' }}",
+        "toEmail": "={{ $env.EMAIL_DUENO || $env.GMAIL_USUARIO }}",
+        "subject": "={{ 'OmniAgent · resumen del ' + $now.setZone('Europe/Madrid').toFormat('dd/MM') }}",
+        "emailFormat": "text",
+        "text": "={{ $json.texto }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "ce42a762-45ee-5093-bba4-f25bdb372ef9",
+      "name": "Email al dueño",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        -100
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "omniGmailSmtp001",
+          "name": "Gmail SMTP"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((it) => ({ json: { texto: it.json.texto, botones: null } }));\n"
+      },
+      "id": "cb902b88-cb4f-5468-812d-2f3fd185abfb",
+      "name": "Aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        10
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        10
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        190
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "1d43334b-850a-5f3d-b403-f7e1ccc7f761",
+      "name": "Ejecutar ahora",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Cada día 20:30": {
+      "main": [
+        [
+          {
+            "node": "Datos del día",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos del día": {
+      "main": [
+        [
+          {
+            "node": "Redactar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redactar": {
+      "main": [
+        [
+          {
+            "node": "¿Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Email?": {
+      "main": [
+        [
+          {
+            "node": "Email al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "Datos del día",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

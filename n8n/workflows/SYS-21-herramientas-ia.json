@@ -1,0 +1,463 @@
+{
+  "id": "omniSYS21herrams",
+  "name": "SYS-21 Herramientas para IAs",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "accion"
+            },
+            {
+              "name": "id"
+            },
+            {
+              "name": "decision"
+            },
+            {
+              "name": "texto"
+            },
+            {
+              "name": "agente_id"
+            },
+            {
+              "name": "formato"
+            }
+          ]
+        }
+      },
+      "id": "8e7813f2-c60c-5046-a09e-9f9f438e3c56",
+      "name": "Llamada de herramienta",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst a = String(i.accion || '');\nconst mapa = {\n  resumen: {}, aprobaciones: {}, leads: {}, incidentes: {}, agentes: {},\n  decidir: { id: i.id, decision: i.decision, comentario: i.texto || '' },\n  orden: { texto: i.texto },\n  agente_ejecutar: { agente_id: Number(i.agente_id), input: i.texto },\n  incidente_reintentar: { id: i.id },\n};\nif (a === 'ciclo_contenido') return [{ json: { ruta: 1 } }];\nconst f = String(i.formato || '').toLowerCase();\nif (a === 'generar_imagen') return [{ json: { ruta: 4, tipo: ['portada', 'miniatura'].includes(f) ? f : 'post',\n  formato: ['cuadrado', 'vertical', 'horizontal'].includes(f) ? f : undefined, tema: i.texto } }];\nif (a === 'generar_video') return [{ json: { ruta: 5, prompt: i.texto, formato: f === 'horizontal' ? 'horizontal' : 'vertical', avisar: true, titulo: String(i.texto || '').slice(0, 60) } }];\nif (a === 'producir_videos') return [{ json: { ruta: 8 } }];\nif (a === 'crear_web') return [{ json: { ruta: 6, encargo: i.texto, avisar: true } }];\nif (a === 'crear_negocio') return [{ json: { ruta: 7, texto: i.texto, tipo: f === 'canal' ? 'canal' : 'negocio' } }];\nif (a === 'pausar' || a === 'reanudar') return [{ json: { ruta: 0, cuerpo: { accion: 'piloto', datos: { pausa: a === 'pausar' } } } }];\nif (a === 'publicar_ahora') return [{ json: { ruta: 2 } }];\nif (!(a in mapa)) return [{ json: { ruta: 3, resultado: 'Acción desconocida: ' + a } }];\nreturn [{ json: { ruta: 0, cuerpo: { accion: a, datos: mapa[a] } } }];\n"
+      },
+      "id": "c89d26d8-b0d0-53f1-adb0-d54f133eb5a6",
+      "name": "Enrutar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 9,
+        "output": "={{ $json.ruta }}"
+      },
+      "id": "753d5b4d-1f3a-56d6-ac3a-bd3302954314",
+      "name": "Ruta",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.N8N_INTERNAL_URL || 'http://localhost:5678') + '/webhook/omniagent-control' }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OMNIAGENT_CONTROL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "9f885c59-1a28-52a0-a02b-023b1ab2f9f7",
+      "name": "API de control",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniCNT01directr",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "80a2292b-b87b-51a6-88ef-c9175a83af8b",
+      "name": "Lanzar ciclo de contenido",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniPUB01publica",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "91ac4588-b1e6-556c-83f9-f5ce9b8f19b7",
+      "name": "Lanzar publicador",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniGEN01imagen0",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "eeeee745-b7d1-5473-bc89-cb2906dfe655",
+      "name": "Imagen",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        450
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniGEN02video00",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "05140250-21da-5766-940f-e078ce26ba8e",
+      "name": "Vídeo",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        600
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniGEN03webs000",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "c341b6cf-6261-5f3a-9622-efef0368d0b3",
+      "name": "Web",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        750
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniNEG01negocio",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "3b979038-675e-5d93-abc9-f6e89637427f",
+      "name": "Negocio o canal",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        900
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniVID01fabrica",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "40311afa-5e23-5d14-adef-a9f726af5eb2",
+      "name": "Producir vídeos",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        1050
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const xs = $input.all().map((i) => i.json);\nconst r = xs[0] || {};\nif (r.ruta === 1) return [{ json: { resultado: 'Ciclo de contenido lanzado. En 1-3 minutos las piezas nuevas estarán en la cola o en Aprobar.' } }];\nif (r.ruta === 2) return [{ json: { resultado: 'Publicador lanzado: se publican ahora las piezas en cola cuya hora ya ha llegado.' } }];\nif (r.ruta === 3) return [{ json: { resultado: r.resultado } }];\nif (r.ruta === 5) return [{ json: { resultado: '🎬 Vídeo en marcha con IA: tarda entre 1 y 6 minutos. Te lo envío por WhatsApp y Telegram en cuanto esté.' } }];\nif (r.ruta === 8) return [{ json: { resultado: '🎬 Fábrica de vídeo en marcha: convierte en vídeo el siguiente guion pendiente (respetando VIDEOS_POR_DIA). Te aviso con cada vídeo.' } }];\nif (r.ruta === 6) return [{ json: { resultado: '🌐 Creando la web: en 1-2 minutos te mando el enlace.' } }];\nif (r.ruta === 7) return [{ json: { resultado: '🚀 Creando el proyecto completo (plan, portada, web y la primera semana de contenido). Tarda 2-4 minutos; te aviso al terminar.' } }];\nif (r.url && r.media_tipo === 'imagen') return [{ json: { resultado: JSON.stringify({ respuesta: '🖼 Imagen lista: ' + r.url, url: r.url, media_tipo: 'imagen' }) } }];\nif (r.error) return [{ json: { resultado: 'Error: ' + (r.error.message || JSON.stringify(r.error)) } }];\nreturn [{ json: { resultado: JSON.stringify(xs.length === 1 ? r : xs) } }];\n"
+      },
+      "id": "c2ec75a7-fc25-5e94-8293-a9b617b5325f",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Llamada de herramienta": {
+      "main": [
+        [
+          {
+            "node": "Enrutar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrutar": {
+      "main": [
+        [
+          {
+            "node": "Ruta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ruta": {
+      "main": [
+        [
+          {
+            "node": "API de control",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lanzar ciclo de contenido",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lanzar publicador",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Imagen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Web",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Negocio o canal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Producir vídeos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API de control": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lanzar ciclo de contenido": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lanzar publicador": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Producir vídeos": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Imagen": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vídeo": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Negocio o canal": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

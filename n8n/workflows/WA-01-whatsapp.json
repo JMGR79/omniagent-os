@@ -1,0 +1,729 @@
+{
+  "id": "omniWA01entrante",
+  "name": "WA-01 WhatsApp (dueño y clientes)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7798dac0-fb7b-5e0f-a983-fe61b518e192",
+      "name": "Verificación de Meta",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -300
+      ],
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000000f00"
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $input.first().json.query || {};\nconst ok = q['hub.mode'] === 'subscribe' && !!$env.WHATSAPP_VERIFY_TOKEN && q['hub.verify_token'] === $env.WHATSAPP_VERIFY_TOKEN;\nreturn [{ json: { codigo: ok ? 200 : 403, texto: ok ? String(q['hub.challenge'] || '') : 'forbidden' } }];\n"
+      },
+      "id": "9184b49b-9042-5987-a201-f31a99949f35",
+      "name": "Comprobar token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.texto }}",
+        "options": {
+          "responseCode": "={{ $json.codigo }}"
+        }
+      },
+      "id": "0f398ecf-4ebf-5b2c-9a4f-2554cf9e2a61",
+      "name": "Responder a Meta",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "d6322762-2779-5313-b2e1-b9c74cc4838c",
+      "name": "Mensaje entrante",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000001000"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Solo se aceptan mensajes firmados por Meta (cabecera X-Hub-Signature-256 con tu App Secret).\nconst crypto = require('crypto');\nconst secreto = $env.WHATSAPP_APP_SECRET;\nif (!secreto) throw new Error('Falta WHATSAPP_APP_SECRET: por seguridad se ignoran los mensajes de WhatsApp');\nconst it = $input.first();\nconst firma = String(it.json.headers?.['x-hub-signature-256'] || '');\nconst crudo = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst esperada = 'sha256=' + crypto.createHmac('sha256', secreto).update(crudo).digest('hex');\nif (firma.length !== esperada.length || !crypto.timingSafeEqual(Buffer.from(firma), Buffer.from(esperada))) return [];\nconst body = JSON.parse(crudo.toString('utf8'));\nconst num = (s) => String(s || '').replace(/\\D/g, '');\nconst dueno = num($env.WHATSAPP_NUMERO_DUENO);\nconst out = [];\nfor (const e of body.entry || []) for (const ch of e.changes || []) {\n  const v = ch.value || {};\n  const nombres = {};\n  (v.contacts || []).forEach((c) => { nombres[c.wa_id] = c.profile?.name || ''; });\n  for (const m of v.messages || []) {\n    let texto = '', boton = '';\n    if (m.type === 'text') texto = m.text?.body || '';\n    else if (m.type === 'interactive') { boton = m.interactive?.button_reply?.id || m.interactive?.list_reply?.id || ''; texto = m.interactive?.button_reply?.title || m.interactive?.list_reply?.title || ''; }\n    else if (m.type === 'button') { boton = m.button?.payload || ''; texto = m.button?.text || ''; }\n    else texto = '[Ha enviado un mensaje de tipo ' + m.type + ', que todavía no puedo leer]';\n    const de = num(m.from);\n    out.push({ json: { rol: dueno && de === dueno ? 'dueno' : 'cliente', de, nombre: nombres[m.from] || '',\n      texto: String(texto).slice(0, 4000), boton, tipo: m.type, msg_id: m.id } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "4be69a27-376e-5324-811d-8b933ee8b944",
+      "name": "Verificar firma e interpretar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6e38970f-d3d3-5648-ae48-cf7079c973c4",
+              "leftValue": "={{ $json.rol }}",
+              "rightValue": "dueno",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e9c2d70e-dfb0-5781-afb3-a9dce6ba3081",
+      "name": "¿Es el dueño?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((it) => {\n  const j = it.json, t = String(j.texto || '').trim(), b = String(j.boton || '');\n  let a = null, m;\n  if (/^[ad]:[0-9a-f-]{36}$/i.test(b)) a = { accion: 'decidir', id: b.slice(2), decision: b[0] === 'a' ? 'aprobar' : 'descartar' };\n  else if (/^(hola|men[uú]|ayuda|\\?|\\/start)$/i.test(t)) a = { accion: 'ayuda' };\n  else if (/^(resumen|estado|kpis?|c[oó]mo va.*)$/i.test(t)) a = { accion: 'resumen' };\n  else if (/^(pendientes|aprobar|aprobaciones)$/i.test(t)) a = { accion: 'aprobaciones' };\n  else if (/^leads?$/i.test(t)) a = { accion: 'leads' };\n  else if (/^incidentes?$/i.test(t)) a = { accion: 'incidentes' };\n  else if (/^agentes$/i.test(t)) a = { accion: 'agentes' };\n  else if (/^ciclo$/i.test(t)) a = { accion: 'ciclo_contenido' };\n  else if (/^publicar$/i.test(t)) a = { accion: 'publicar_ahora' };\n  else if (/^pausar$/i.test(t)) a = { accion: 'pausar' };\n  else if (/^reanudar$/i.test(t)) a = { accion: 'reanudar' };\n  else if (/^v[ií]deos$/i.test(t)) a = { accion: 'producir_videos' };\n  else if ((m = t.match(/^agente\\s+(\\d{1,2})\\s*[:\\-]?\\s+([\\s\\S]+)/i))) a = { accion: 'agente_ejecutar', agente_id: m[1], texto: m[2] };\n  else if ((m = t.match(/^orden\\s*[:\\-]?\\s+([\\s\\S]+)/i))) a = { accion: 'orden', texto: m[1] };\n  else if ((m = t.match(/^(imagen|portada|miniatura)\\s*[:\\-]\\s*([\\s\\S]+)/i))) a = { accion: 'generar_imagen', formato: m[1].toLowerCase() === 'imagen' ? 'post' : m[1].toLowerCase(), texto: m[2] };\n  else if ((m = t.match(/^v[ií]deo\\s*[:\\-]\\s*([\\s\\S]+)/i))) a = { accion: 'generar_video', formato: 'vertical', texto: m[1] };\n  else if ((m = t.match(/^web\\s*[:\\-]\\s*([\\s\\S]+)/i))) a = { accion: 'crear_web', texto: m[1] };\n  else if ((m = t.match(/^(negocio|canal)\\s*[:\\-]\\s*([\\s\\S]+)/i))) a = { accion: 'crear_negocio', formato: m[1].toLowerCase(), texto: m[2] };\n  return { json: Object.assign({ accion: 'interpretar', id: '', decision: '', texto: t, agente_id: '', formato: '' }, a || {}, { de: j.de, original: t }) };\n});\n"
+      },
+      "id": "901b4824-71d4-5f70-9fd3-968aebab2441",
+      "name": "Entender orden",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -150
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7ac243cd-6c65-5e87-849e-b455fe11e6aa",
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "interpretar",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1cc70a63-417a-5e6c-9980-5923f1d7c912",
+      "name": "¿Hay que interpretar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -150
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((it) => ({ json: { agente_id: 0, max_tokens: 400, origen: 'WA-01', input:\n  'Eres el asistente de control de OmniAgent OS (EstrategIA Digital 3.0). El dueño escribe por WhatsApp: «' + it.json.original + '».\\n' +\n  'Elige UNA acción y responde SOLO JSON: {\"accion\":\"\",\"id\":\"\",\"decision\":\"\",\"texto\":\"\",\"agente_id\":\"\",\"formato\":\"\"}.\\n' +\n  'Acciones: resumen (cómo va el negocio), aprobaciones (ver pendientes), leads, incidentes, agentes, ciclo_contenido (crear contenido ya), ' +\n  'publicar_ahora, pausar (parar el piloto automático), reanudar, agente_ejecutar (pedir algo a un agente: agente_id 0-14 y texto; ' +\n  '0 Director, 1 Estrategia, 2 Copywriting, 3 Conversación, 4 Visual, 5 Vídeo y voz, 6 Productos formativos, 7 Humanizador, 8 Evaluador, ' +\n  '9 Anuncios, 10 SEO y blog, 11 Marca faceless, 12 Traducción, 13 Analista de comunidad, 14 Archivista), ' +\n  'generar_imagen (texto: qué mostrar; formato: post, portada o miniatura), generar_video (texto: descripción del vídeo), ' +\n  'crear_web (texto: encargo de la web), crear_negocio (texto: la idea; formato: negocio o canal), ' +\n  'orden (encargo de contenido o tarea para el Director: pon en texto la petición completa), ayuda. Si dudas, usa orden.' } }));\n"
+      },
+      "id": "f07cec80-9be9-5d02-b126-9ae0c3e9a8b9",
+      "name": "Pedir a la IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -250
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "c96242ff-43b2-5e67-ad20-4a6ad6257681",
+      "name": "IA de control",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        -250
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nconst previos = $('Entender orden').all().filter((x) => x.json.accion === 'interpretar');\nconst validas = ['resumen', 'aprobaciones', 'leads', 'incidentes', 'agentes', 'ciclo_contenido', 'publicar_ahora', 'pausar', 'reanudar', 'agente_ejecutar', 'orden', 'ayuda',\n  'generar_imagen', 'generar_video', 'crear_web', 'crear_negocio', 'producir_videos'];\nreturn $input.all().map((it, i) => {\n  const p = previos[i]?.json || {};\n  let r = {};\n  try { r = jsonDeTexto(it.json.respuesta); } catch (e) { r = {}; }\n  const accion = validas.includes(r.accion) ? r.accion : 'orden';\n  return { json: { accion, id: '', decision: '', texto: String(r.texto || p.original || ''), agente_id: String(r.agente_id ?? ''), formato: String(r.formato || ''), de: p.de, original: p.original } };\n});\n"
+      },
+      "id": "4d87503e-f8c2-568a-8c68-663ef068e8b6",
+      "name": "Leer intención",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -250
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((it) => ({ json: it.json }));\n"
+      },
+      "id": "52c14606-723b-5e03-af61-a0ab2dff0f42",
+      "name": "Preparar herramienta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -150
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniSYS21herrams",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "73c763f1-c562-5e25-ab1c-b3c4592a672e",
+      "name": "Ejecutar herramienta",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        -150
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Preparar herramienta').all();\nconst AYUDA = \"🤖 *OmniAgent* · lo que puedes escribirme:\\n• *resumen* → cómo va el negocio\\n• *pendientes* → piezas por aprobar (con botones)\\n• *leads* · *incidentes* · *agentes*\\n• *ciclo* → crear contenido ahora\\n• *publicar* → publicar ya lo que toca\\n• *pausar* / *reanudar* → piloto automático\\n• *agente 2: tu petición* → hablar con un agente (0-14)\\n• *orden: …* → encargo al Director\\n• *imagen: …* · *portada: …* · *miniatura: …* → imagen con IA\\n• *video: …* → short o reel con IA · *videos* → convertir ya en vídeo los guiones pendientes\\n• *web: …* → landing con formulario\\n• *negocio: …* · *canal: …* → negocio o canal completo\\nO escríbeme normal («prepara 3 posts para mañana sobre WhatsApp») y lo entiendo.\";\nconst lista = (d) => (Array.isArray(d) ? d : d && Object.keys(d).length ? [d] : []);\nconst out = [];\n$input.all().forEach((it, i) => {\n  const c = ctx[i]?.json || {};\n  const r = it.json.resultado ?? (it.json.error ? 'Error: ' + (it.json.error.message || JSON.stringify(it.json.error)) : '');\n  let d; try { d = JSON.parse(r); } catch (e) { d = r; }\n  let texto = '';\n  const extra = [];\n  switch (c.accion) {\n    case 'ayuda': texto = AYUDA; break;\n    case 'resumen': { const k = d.kpis || {};\n      texto = '📊 *EstrategIA Digital 3.0 · hoy*\\n👤 Leads: ' + k.leads_hoy + ' (semana: ' + k.leads_semana + ')\\n📝 Piezas creadas: ' + k.piezas_hoy +\n        ' · publicadas 7 días: ' + k.publicadas_semana + '\\n💶 IA: ' + k.coste_ia_hoy + ' € de ' + k.presupuesto_ia + ' €\\n💰 Ingresos del mes: ' + k.ingresos_mes +\n        ' €\\n🟡 Por aprobar: ' + k.aprobaciones + ' · 🛠 Incidentes: ' + k.incidentes + (k.en_pausa ? '\\n⏸ Piloto automático EN PAUSA (escribe *reanudar*)' : '') + (k.aprobaciones ? '\\n\\nEscribe *pendientes* para verlas.' : '');\n      break; }\n    case 'aprobaciones': { const l = lista(d);\n      if (!l.length) { texto = '✅ No hay nada pendiente de aprobar.'; break; }\n      texto = '🟡 ' + l.length + ' pieza(s) por aprobar' + (l.length > 5 ? ' (te mando las 5 primeras)' : '') + ':';\n      l.slice(0, 5).forEach((p) => extra.push({ texto: '*' + p.canal + '* · ' + p.formato + (p.sensible ? ' · ⚠ sensible' : '') + '\\n\\n' + String(p.texto || '').slice(0, 900),\n        botones: [{ id: 'a:' + p.id, titulo: '✅ Aprobar' }, { id: 'd:' + p.id, titulo: '🗑 Descartar' }] }));\n      break; }\n    case 'decidir': texto = d && d.ok ? (c.decision === 'aprobar' ? '✅ Aprobada: se publicará en la próxima hora.' : '🗑 Descartada.') : 'No pude aplicarlo: ' + String(r).slice(0, 300); break;\n    case 'leads': { const l = lista(d); texto = l.length ? '👤 *Últimos leads*\\n' + l.slice(0, 10).map((x) => '• ' + x.nombre + ' · ' + x.score + ' pts · ' + x.estado + ' · ' + x.origen + ' · ' + x.fecha).join('\\n') : 'Aún no hay leads.'; break; }\n    case 'incidentes': { const l = lista(d); texto = l.length ? '🛠 *Incidentes*\\n' + l.slice(0, 8).map((x) => '• ' + x.cuando + ' ' + x.workflow + (x.autorreparado ? ' ✅' : ' ⚠') + '\\n  ' + String(x.error || '').slice(0, 120)).join('\\n') : '✅ Sin incidentes.'; break; }\n    case 'agentes': { const l = lista(d); texto = '🤖 *Agentes*\\n' + l.map((x) => x.id + ' · ' + x.nombre + ' (' + x.ejecuciones_7d + ' usos, ' + x.coste_7d + ' €)').join('\\n'); break; }\n    case 'agente_ejecutar': case 'orden': texto = (d && d.respuesta) || String(r); break;\n    case 'generar_imagen':\n      if (d && d.url) { out.push({ json: { to: c.de, texto: '🖼 ' + String(c.texto || '').slice(0, 200), media_url: d.url, media_tipo: 'imagen' } }); texto = 'Enlace: ' + d.url; }\n      else texto = String(r);\n      break;\n    default: texto = typeof d === 'string' ? d : (d.respuesta || JSON.stringify(d).slice(0, 1500));\n  }\n  out.push({ json: { to: c.de, texto } });\n  extra.forEach((e) => out.push({ json: Object.assign({ to: c.de }, e) }));\n});\nreturn out;\n"
+      },
+      "id": "2ab30300-ae36-5f73-b9d0-01abf118056b",
+      "name": "Redactar respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -150
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "5791c3a2-7349-5bd5-afa4-d70dba5c4bb8",
+      "name": "Contestar al dueño",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        -150
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO contactos (telefono, nombre, origen, ultimo_contacto) VALUES ($1, nullif($2, ''), 'whatsapp', now())\nON CONFLICT (telefono) DO UPDATE SET ultimo_contacto = now(), nombre = coalesce(contactos.nombre, excluded.nombre)\nRETURNING id, score, (SELECT coalesce(string_agg('Cliente: ' || left(m.entrante, 300) || E'\\nNosotros: ' || left(coalesce(m.respuesta, ''), 300), E'\\n---\\n'), '')\n                      FROM (SELECT * FROM mensajes WHERE contacto_id = contactos.id ORDER BY creado_en DESC LIMIT 4) m) AS historial",
+        "options": {
+          "queryReplacement": "={{ [$json.de, $json.nombre] }}"
+        }
+      },
+      "id": "5cd7151d-14c5-5653-ba1f-45690ceede2e",
+      "name": "Contacto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        660,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msgs = $('¿Es el dueño?').all();\nreturn $input.all().map((it, i) => {\n  const e = $('Verificar firma e interpretar').all().filter((x) => x.json.rol === 'cliente')[i].json;\n  const c = it.json;\n  const input = 'Mensaje de WhatsApp de un cliente (' + (e.nombre || 'sin nombre') + '):\\n«' + e.texto + '»' +\n    (c.historial ? '\\n\\nConversación anterior (de la más reciente a la más antigua):\\n' + c.historial : '\\n\\nEs su primer mensaje.') +\n    '\\n\\nResponde como en WhatsApp: breve (máximo 5 líneas), cercano, sin listas largas. Responde SOLO JSON: {\"respuesta\":\"\",\"requiere_humano\":false,\"motivo\":\"\",\"score\":0,\"intencion\":\"info|compra|soporte|queja|spam|otro\"}' +\n    '\\nPon requiere_humano=true si quiere precio cerrado, contratar, reservar, se queja, pide hablar con una persona, o no sabes la respuesta.';\n  return { json: { agente_id: 3, input, max_tokens: 800, origen: 'WA-01' } };\n});\n"
+      },
+      "id": "a8724c71-3ecd-5b75-b5dc-17188e86ebb0",
+      "name": "Encargo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "e585b646-e16a-5725-8036-abe0f82dc80a",
+      "name": "Agente de conversación",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nconst clientes = $('Verificar firma e interpretar').all().filter((x) => x.json.rol === 'cliente');\nconst contactos = $('Contacto').all();\nconst auto = String($env.MODO_AUTOMATICO || 'true') === 'true';\nreturn $input.all().map((it, i) => {\n  const e = clientes[i].json, c = contactos[i].json;\n  let r;\n  try { r = jsonDeTexto(it.json.respuesta); } catch (err) { r = { respuesta: '', requiere_humano: true, motivo: 'Respuesta del agente no válida', score: 0, intencion: 'otro' }; }\n  const pidePersona = /\\bpersona\\b|humano|hablar con alguien/i.test(e.texto);\n  const spam = r.intencion === 'spam';\n  const humano = !spam && (pidePersona || !!r.requiere_humano || !auto || !String(r.respuesta || '').trim());\n  let respuesta = String(r.respuesta || '').trim();\n  if (!c.historial) respuesta += '\\n\\n_(Te atiende el asistente de IA de EstrategIA Digital 3.0. Escribe «persona» para hablar con el equipo.)_';\n  if (humano) respuesta = (respuesta && !pidePersona ? respuesta + '\\n\\n' : '') + 'Le paso tu mensaje al equipo y te escribimos en cuanto podamos. 🙌';\n  return { json: { to: e.de, texto: spam ? '' : respuesta, humano, spam, score: Math.max(0, Math.min(100, Number(r.score) || 0)),\n    intencion: r.intencion || 'otro', motivo: r.motivo || '', contacto_id: c.id, entrante: e.texto, nombre: e.nombre } };\n});\n"
+      },
+      "id": "bbca769f-4fa3-50af-a91a-ab5925a4f661",
+      "name": "Decidir respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "1d74fee4-22a2-5c62-a1cc-bab562fab087",
+      "name": "Responder al cliente",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH m AS (INSERT INTO mensajes (canal, contacto_id, entrante, respuesta, estado)\n           VALUES ('whatsapp', $1::uuid, $2, nullif($3, ''), $4) RETURNING id)\nUPDATE contactos SET score = greatest(score, $5::int), estado = CASE WHEN $6 = 'compra' THEN 'caliente' WHEN $6 = 'spam' THEN 'spam' ELSE estado END\nWHERE id = $1::uuid RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [$json.contacto_id, $json.entrante, $json.texto, $json.spam ? 'ignorado' : ($json.humano ? 'pendiente_humano' : 'respondido'), $json.score, $json.intencion] }}"
+        }
+      },
+      "id": "09796bb8-6add-55ac-85d4-bdffaa5790a5",
+      "name": "Registrar conversación",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1540,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\n\nconst out = [];\nfor (const it of $('Decidir respuesta').all()) {\n  const d = it.json;\n  const quien = (d.nombre ? d.nombre + ' · ' : '') + '+' + d.to;\n  if (d.humano) out.push(...avisoTelegram('💬 WhatsApp que necesita a una persona (' + d.intencion + ', score ' + d.score + ')\\nDe: ' + quien + '\\nMotivo: ' + d.motivo + '\\n\\n«' + d.entrante.slice(0, 1200) + '»\\n\\nRespóndele en wa.me/' + d.to));\n  else if (d.score >= 70) out.push(...avisoTelegram('🔥 Lead caliente por WhatsApp (score ' + d.score + '): ' + quien + '\\n«' + d.entrante.slice(0, 300) + '»'));\n}\nreturn out;\n"
+      },
+      "id": "223af9f6-ef15-5542-8f0c-415fb8a85057",
+      "name": "Avisar al dueño",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        210
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        390
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Verificación de Meta": {
+      "main": [
+        [
+          {
+            "node": "Comprobar token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar token": {
+      "main": [
+        [
+          {
+            "node": "Responder a Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje entrante": {
+      "main": [
+        [
+          {
+            "node": "Verificar firma e interpretar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar firma e interpretar": {
+      "main": [
+        [
+          {
+            "node": "¿Es el dueño?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es el dueño?": {
+      "main": [
+        [
+          {
+            "node": "Entender orden",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Contacto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entender orden": {
+      "main": [
+        [
+          {
+            "node": "¿Hay que interpretar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay que interpretar?": {
+      "main": [
+        [
+          {
+            "node": "Pedir a la IA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar herramienta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir a la IA": {
+      "main": [
+        [
+          {
+            "node": "IA de control",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA de control": {
+      "main": [
+        [
+          {
+            "node": "Leer intención",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer intención": {
+      "main": [
+        [
+          {
+            "node": "Preparar herramienta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar herramienta": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar herramienta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar herramienta": {
+      "main": [
+        [
+          {
+            "node": "Redactar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redactar respuesta": {
+      "main": [
+        [
+          {
+            "node": "Contestar al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contacto": {
+      "main": [
+        [
+          {
+            "node": "Encargo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encargo": {
+      "main": [
+        [
+          {
+            "node": "Agente de conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente de conversación": {
+      "main": [
+        [
+          {
+            "node": "Decidir respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir respuesta": {
+      "main": [
+        [
+          {
+            "node": "Responder al cliente",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Registrar conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar conversación": {
+      "main": [
+        [
+          {
+            "node": "Avisar al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar al dueño": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

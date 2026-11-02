@@ -1,0 +1,636 @@
+{
+  "id": "omniGEN02video00",
+  "name": "GEN-02 Generar vídeo (Veo u OpenAI)",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "e0fb1582-9fb0-5811-bff2-c516d5d02689",
+      "name": "Generar vídeo",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst prov = String($env.PROVEEDOR_VIDEO || '').toLowerCase();\nconst horizontal = j.formato === 'horizontal';\nconst comun = { prov, prompt: String(j.prompt || ''), pieza_id: j.pieza_id || '', avisar: !!j.avisar, titulo: j.titulo || '' };\nif (prov === 'gemini') {\n  if (!$env.GEMINI_API_KEY) throw new Error('Falta GEMINI_API_KEY');\n  const base = ($env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com') + '/v1beta/';\n  return [{ json: Object.assign(comun, { base, url: base + 'models/' + ($env.MODELO_VIDEO || 'veo-3.1-generate-preview') + ':predictLongRunning',\n    cab: { 'x-goog-api-key': $env.GEMINI_API_KEY },\n    cuerpo: { instances: [{ prompt: comun.prompt.slice(0, 4000) }], parameters: { aspectRatio: horizontal ? '16:9' : '9:16' } } }) }];\n}\nif (prov === 'openai') {\n  // Sora (API de vídeos de OpenAI). OpenAI anunció su retirada; si ya no está disponible, usa PROVEEDOR_VIDEO=gemini.\n  if (!$env.OPENAI_API_KEY) throw new Error('Falta OPENAI_API_KEY');\n  const base = ($env.OPENAI_BASE_URL || 'https://api.openai.com') + '/v1/videos';\n  return [{ json: Object.assign(comun, { base, url: base, cab: { Authorization: 'Bearer ' + $env.OPENAI_API_KEY },\n    modelo: $env.MODELO_VIDEO || 'sora-2', tamano: horizontal ? '1280x720' : '720x1280', segundos: String($env.SEGUNDOS_VIDEO || '8') }) }];\n}\nthrow new Error('Configura PROVEEDOR_VIDEO: gemini (Veo) u openai (Sora) para generar vídeos');\n"
+      },
+      "id": "284ad5b0-8bd6-5118-8878-a8a4ab16ca7f",
+      "name": "Preparar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5bac6248-837f-56d0-8223-9e6f6ccfa3b0",
+              "leftValue": "={{ $json.prov }}",
+              "rightValue": "openai",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ae288f4a-b5ae-559e-82ab-8f399a666fd9",
+      "name": "¿Sora?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        330,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.cab || {}) }}",
+        "options": {
+          "timeout": 300000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo || {}) }}"
+      },
+      "id": "020efd20-d462-5f58-af23-8a33614031da",
+      "name": "Lanzar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.cab) }}",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formData",
+              "name": "model",
+              "value": "={{ $json.modelo }}"
+            },
+            {
+              "parameterType": "formData",
+              "name": "prompt",
+              "value": "={{ $json.prompt.slice(0, 4000) }}"
+            },
+            {
+              "parameterType": "formData",
+              "name": "size",
+              "value": "={{ $json.tamano }}"
+            },
+            {
+              "parameterType": "formData",
+              "name": "seconds",
+              "value": "={{ $json.segundos }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "a92dcbff-8312-53ca-8950-309033bcb316",
+      "name": "Lanzar Sora",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst p = $('Preparar').first().json;\nif (p.prov === 'openai') {\n  if (!r.id) throw new Error('Sora no aceptó el vídeo: ' + JSON.stringify(r.error || r).slice(0, 300));\n  return [{ json: { url: p.base + '/' + r.id, cab: p.cab } }];\n}\nif (!r.name) throw new Error('Veo no devolvió operación: ' + JSON.stringify(r).slice(0, 300));\nreturn [{ json: { url: p.base + r.name, cab: p.cab } }];\n"
+      },
+      "id": "6ca186ad-3262-5dd8-91d8-6645673de8e4",
+      "name": "Operación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "id": "d4b8d751-9fbb-5936-ae66-8b8af9f0f333",
+      "name": "Esperar 20 s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ],
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000001100"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.cab || {}) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "33e60127-cf61-5298-bbc1-9a69c73aec31",
+      "name": "Consultar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst p = $('Operación').first().json;\nconst prov = $('Preparar').first().json.prov;\nif (prov === 'openai') {\n  if (r.status === 'failed') throw new Error('Sora: ' + (r.error?.message || 'el vídeo falló'));\n  if (r.status !== 'completed') {\n    if ($runIndex > 45) throw new Error('Sora tarda demasiado (más de 15 minutos)');\n    return [{ json: { listo: false, url: p.url, cab: p.cab } }];\n  }\n  return [{ json: { listo: true, url: p.url + '/content', cab: p.cab } }];\n}\nif (r.error) throw new Error('Veo: ' + (r.error.message || JSON.stringify(r.error)));\nif (!r.done) {\n  if ($runIndex > 45) throw new Error('Veo tarda demasiado (más de 15 minutos)');\n  return [{ json: { listo: false, url: p.url, cab: p.cab } }];\n}\nconst uri = r.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;\nif (!uri) throw new Error('Veo terminó sin vídeo (puede haberlo bloqueado su filtro de seguridad): ' + JSON.stringify(r.response || r).slice(0, 300));\nreturn [{ json: { listo: true, url: uri, cab: p.cab } }];\n"
+      },
+      "id": "4abdb55a-97d1-5537-b445-1fb7a34ddb11",
+      "name": "¿Listo?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0f8d303a-2869-52ba-8b3d-2892bddaaf46",
+              "leftValue": "={{ $json.listo }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "205b3f10-489e-5375-96aa-b4591c8b75a4",
+      "name": "¿Terminado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.cab) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "201ce55d-f417-5d84-878e-8d6431be0c65",
+      "name": "Descargar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const buf = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst p = $('Preparar').first().json;\nreturn [{ json: { params: [buf.toString('base64'), 'video/mp4', p.prompt.slice(0, 2000), p.pieza_id] } }];\n"
+      },
+      "id": "e0b28c4e-24f4-549d-ab18-ef31f96fa754",
+      "name": "A base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO medios (tipo, mime, datos, prompt, pieza_id) VALUES ('video', $2, decode($1, 'base64'), $3, nullif($4, '')::uuid) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "cd8cb919-c343-58e7-b438-bc658aca6c3f",
+      "name": "Guardar medio",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2200,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const BASE = String($env.WEBHOOK_URL || $env.N8N_EDITOR_BASE_URL || 'http://localhost:5678/').replace(/\\/$/, '');\n\nconst p = $('Preparar').first().json;\nconst id = $input.first().json.id;\nreturn [{ json: { medio_id: id, pieza_id: p.pieza_id, url: BASE + '/webhook/medio?id=' + id, media_tipo: 'video', avisar: p.avisar, titulo: p.titulo } }];\n"
+      },
+      "id": "242a3713-e9f3-5e87-80f3-87cf119500bd",
+      "name": "Dirección pública",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE piezas SET media_url = $1, actualizado_en = now() WHERE id = nullif($2, '')::uuid RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [$json.url, $json.pieza_id] }}"
+        }
+      },
+      "id": "7b77c24f-d00a-5561-bb1c-e340d7b8ac74",
+      "name": "Asignar a la pieza",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2640,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\n\nconst d = $('Dirección pública').first().json;\nif (!d.avisar) return [];\nreturn avisoTelegram('🎬 Vídeo listo' + (d.titulo ? ': ' + d.titulo : '') + '\\n' + d.url).map((x) => ({ json: Object.assign(x.json, { media_url: d.url, media_tipo: 'video' }) }));\n"
+      },
+      "id": "fd7cb98b-e81b-522f-a103-d1207950bef7",
+      "name": "Avisar si toca",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -250
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Dirección pública').all().map((it) => ({ json: it.json }));\n"
+      },
+      "id": "c2ec75a7-fc25-5e94-8293-a9b617b5325f",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        -340
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        3080,
+        -160
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Generar vídeo": {
+      "main": [
+        [
+          {
+            "node": "Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar": {
+      "main": [
+        [
+          {
+            "node": "¿Sora?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Sora?": {
+      "main": [
+        [
+          {
+            "node": "Lanzar Sora",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lanzar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lanzar Sora": {
+      "main": [
+        [
+          {
+            "node": "Operación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lanzar": {
+      "main": [
+        [
+          {
+            "node": "Operación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Operación": {
+      "main": [
+        [
+          {
+            "node": "Esperar 20 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 20 s": {
+      "main": [
+        [
+          {
+            "node": "Consultar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar": {
+      "main": [
+        [
+          {
+            "node": "¿Listo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Listo?": {
+      "main": [
+        [
+          {
+            "node": "¿Terminado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Terminado?": {
+      "main": [
+        [
+          {
+            "node": "Descargar",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar 20 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar": {
+      "main": [
+        [
+          {
+            "node": "A base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A base64": {
+      "main": [
+        [
+          {
+            "node": "Guardar medio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar medio": {
+      "main": [
+        [
+          {
+            "node": "Dirección pública",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dirección pública": {
+      "main": [
+        [
+          {
+            "node": "Asignar a la pieza",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Asignar a la pieza": {
+      "main": [
+        [
+          {
+            "node": "Avisar si toca",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar si toca": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

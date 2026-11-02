@@ -1,0 +1,430 @@
+{
+  "id": "omniNEG01negocio",
+  "name": "NEG-01 Crear negocio o canal",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "aa2207a4-8624-506b-9833-b2c955f5f380",
+      "name": "Crear negocio o canal",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst idea = String(j.texto || '').trim();\nif (!idea) throw new Error('Describe el negocio o canal que quieres crear');\nconst tipo = j.tipo === 'canal' || /\\bcanal\\b/i.test(idea) ? 'canal' : 'negocio';\nconst canales = String($env.CANALES_ACTIVOS || 'facebook,instagram,linkedin,x,tiktok,youtube').split(',').map((s) => s.trim()).filter(Boolean);\nconst input = 'Diseña un ' + (tipo === 'canal' ? 'canal de contenido automatizado (faceless)' : 'negocio digital') + ' a partir de esta idea: «' + idea + '».\\n' +\n  'Canales disponibles: ' + canales.join(', ') + '.\\n' +\n  'Responde SOLO JSON con esta forma: {\"nombre\":\"\",\"slug\":\"nombre-corto-sin-espacios\",\"nicho\":\"\",\"publico\":\"\",\"propuesta\":\"una frase\",\"oferta\":{\"producto\":\"\",\"precio\":\"\",\"formato\":\"\"},' +\n  '\"pilares\":[\"\",\"\"],\"canales\":[\"\"],\"encargo_web\":\"brief detallado de la landing: secciones, textos clave, oferta y llamada a la acción\",\"portada\":\"descripción visual de la portada de marca\",' +\n  '\"piezas\":[{\"canal\":\"\",\"formato\":\"post|carrusel|hilo|reel|short\",\"tema\":\"\",\"texto\":\"texto final o guion\",\"hashtags\":\"\",\"texto_imagen\":\"máx 6 palabras\",\"publicar_en_dias\":0}]}\\n' +\n  'Incluye 7 piezas (una por día, de 0 a 6) repartidas entre los canales. Para tiktok, youtube y los reels, el texto es un guion de 30-45 s con [TEXTO EN PANTALLA] y [VOZ]. Para X, si es un hilo, separa los tuits con una línea ---.';\nreturn [{ json: { agente_id: 16, input, max_tokens: 8000, origen: 'NEG-01', _tipo: tipo, _idea: idea, _canales: canales } }];\n"
+      },
+      "id": "a8724c71-3ecd-5b75-b5dc-17188e86ebb0",
+      "name": "Encargo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "03691e99-9c12-577b-93b3-d8f71d6c43ab",
+      "name": "Creador de negocios",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nconst e = $('Encargo').first().json;\nconst plan = jsonDeTexto($input.first().json.respuesta);\nplan.slug = String(plan.slug || plan.nombre || 'proyecto').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) + '-' + Math.random().toString(36).slice(2, 6);\nplan.piezas = (plan.piezas || []).filter((p) => e._canales.includes(String(p.canal || '').toLowerCase()) && String(p.texto || '').trim()).slice(0, 10);\nreturn [{ json: { plan, params: [String(plan.nombre || e._idea).slice(0, 120), e._tipo, String(plan.nicho || '').slice(0, 200), JSON.stringify(plan), plan.slug] } }];\n"
+      },
+      "id": "1e5067bb-5422-5e0d-ac64-9e249f2fb37d",
+      "name": "Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO proyectos (nombre, tipo, nicho, plan, web_slug) VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "10a73cfb-bce7-5687-8017-87e9000472f8",
+      "name": "Guardar proyecto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('Plan').first().json.plan;\nreturn [{ json: { tipo: 'portada', formato: 'horizontal', tema: (plan.nombre || '') + '. ' + (plan.portada || plan.propuesta || ''), texto_imagen: String(plan.nombre || '').slice(0, 40) } }];\n"
+      },
+      "id": "2c9362eb-aa13-5f55-855e-87e340260b04",
+      "name": "Pedido de portada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniGEN01imagen0",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "332027c0-ad4b-555f-aa3b-821f2a7d7b0e",
+      "name": "Portada",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('Plan').first().json.plan;\nconst proyecto = $('Guardar proyecto').first().json.id;\nconst portada = $input.first().json.url || '';\nreturn [{ json: { encargo: 'Negocio: ' + plan.nombre + '\\nPropuesta: ' + (plan.propuesta || '') + '\\nPúblico: ' + (plan.publico || '') +\n  '\\nOferta: ' + JSON.stringify(plan.oferta || {}) + '\\n\\n' + (plan.encargo_web || ''), slug: plan.slug, titulo: plan.nombre, proyecto_id: proyecto, imagen_url: portada, avisar: false } }];\n"
+      },
+      "id": "3d13a3d3-d096-5975-a61f-f148fd9b78a9",
+      "name": "Pedido de web",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniGEN03webs000",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "c341b6cf-6261-5f3a-9622-efef0368d0b3",
+      "name": "Web",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('Plan').first().json.plan;\nconst proyecto = $('Guardar proyecto').first().json.id;\nconst ahora = Date.now();\nreturn plan.piezas.map((p) => {\n  const canal = String(p.canal).toLowerCase();\n  const video = canal === 'tiktok' || canal === 'youtube' || (canal === 'instagram' && /reel|short|video/i.test(p.formato || ''));\n  const dias = Math.max(0, Math.min(30, Number(p.publicar_en_dias) || 0));\n  return { json: { params: [canal, String(p.texto).trim(), String(p.hashtags || ''), video ? 'requiere_video' : 'pendiente_aprobacion',\n    new Date(ahora + dias * 86400e3 + 3600e3).toISOString(), String(p.formato || 'post'), String(p.tema || '').slice(0, 200), String(p.texto_imagen || '').slice(0, 60), proyecto] } };\n});\n"
+      },
+      "id": "e54826a4-c141-5c8a-9773-1616675d273f",
+      "name": "Piezas del calendario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO piezas (canal, brief, hashtags, estado, programado_para, formato, tema, texto_imagen, proyecto_id)\nVALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7, nullif($8, ''), $9::uuid) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "4957b1a4-19d2-590f-81c4-f1dd063bc7fc",
+      "name": "Guardar piezas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2200,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\nconst BASE = String($env.WEBHOOK_URL || $env.N8N_EDITOR_BASE_URL || 'http://localhost:5678/').replace(/\\/$/, '');\n\nconst plan = $('Plan').first().json.plan;\nconst portada = $('Portada').first().json.url || '';\nconst web = $('Web').first().json.url || '';\nconst n = $input.all().length;\nconst texto = '🚀 ' + ($('Encargo').first().json._tipo === 'canal' ? 'Canal' : 'Negocio') + ' creado: *' + plan.nombre + '*\\n' +\n  (plan.propuesta ? '💡 ' + plan.propuesta + '\\n' : '') + (plan.publico ? '👥 ' + plan.publico + '\\n' : '') +\n  (plan.oferta?.producto ? '🛒 ' + plan.oferta.producto + (plan.oferta.precio ? ' · ' + plan.oferta.precio : '') + '\\n' : '') +\n  (plan.pilares?.length ? '🧱 Pilares: ' + plan.pilares.join(' · ') + '\\n' : '') +\n  (web ? '🌐 Web: ' + web + '\\n' : '⚠ La web no se pudo crear\\n') + (portada ? '🖼 Portada: ' + portada + '\\n' : '') +\n  '📅 ' + n + ' piezas preparadas para la primera semana: las de texto esperan tu aprobación y los vídeos se generarán solos.';\nreturn avisoTelegram(texto).map((x) => ({ json: Object.assign(x.json, portada ? { media_url: portada, media_tipo: 'imagen' } : {}) }));\n"
+      },
+      "id": "35bfbe55-4513-51fa-b950-054c910cb9ae",
+      "name": "Informe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -90
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        -90
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        90
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Crear negocio o canal": {
+      "main": [
+        [
+          {
+            "node": "Encargo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encargo": {
+      "main": [
+        [
+          {
+            "node": "Creador de negocios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Creador de negocios": {
+      "main": [
+        [
+          {
+            "node": "Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan": {
+      "main": [
+        [
+          {
+            "node": "Guardar proyecto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar proyecto": {
+      "main": [
+        [
+          {
+            "node": "Pedido de portada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido de portada": {
+      "main": [
+        [
+          {
+            "node": "Portada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Portada": {
+      "main": [
+        [
+          {
+            "node": "Pedido de web",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido de web": {
+      "main": [
+        [
+          {
+            "node": "Web",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web": {
+      "main": [
+        [
+          {
+            "node": "Piezas del calendario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Piezas del calendario": {
+      "main": [
+        [
+          {
+            "node": "Guardar piezas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar piezas": {
+      "main": [
+        [
+          {
+            "node": "Informe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Informe": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

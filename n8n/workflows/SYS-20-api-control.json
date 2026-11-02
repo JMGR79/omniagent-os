@@ -1,0 +1,422 @@
+{
+  "id": "omniSYS20control",
+  "name": "SYS-20 API de control (OmniAgent Control)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "omniagent-control",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "3837b1d9-84ca-5346-aead-10c44b8b6dbf",
+      "name": "Webhook de control",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000000d00"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Valida el token y traduce cada acción de la app a una consulta SQL o a una llamada HTTP.\n// Solo se ejecutan consultas de esta lista blanca: la app nunca envía SQL.\nconst req = $input.first().json;\nconst auth = String(req.headers?.authorization || '').replace(/^Bearer\\s+/i, '');\nconst esperado = $env.OMNIAGENT_CONTROL_TOKEN;\nif (!esperado || auth !== esperado) return [{ json: { tipo: 'error', codigo: 401, r: { error: 'No autorizado' } } }];\n\nconst { accion, datos = {} } = req.body || {};\nconst API = ($env.N8N_API_URL || 'http://localhost:5678') + '/api/v1';\nconst uuid = (v) => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || '')) ? String(v) : '00000000-0000-0000-0000-000000000000');\nconst SQL = {\n  resumen: [`SELECT json_build_object(\n      'leads_hoy', (SELECT count(*) FROM contactos WHERE fecha_alta::date = current_date),\n      'leads_semana', (SELECT count(*) FROM contactos WHERE fecha_alta >= current_date - 7),\n      'piezas_hoy', (SELECT count(*) FROM piezas WHERE creado_en::date = current_date),\n      'publicadas_semana', (SELECT count(*) FROM publicaciones WHERE publicado_en >= now() - interval '7 days'),\n      'coste_ia_hoy', (SELECT round(coalesce(sum(coste_eur), 0), 2) FROM ejecuciones_agente WHERE creado_en::date = current_date),\n      'presupuesto_ia', $1::numeric,\n      'ingresos_mes', (SELECT coalesce(sum(importe), 0) FROM pedidos WHERE estado = 'pagado' AND date_trunc('month', creado_en) = date_trunc('month', now())),\n      'ingresos_var', (SELECT coalesce(round(100 * (sum(importe) FILTER (WHERE date_trunc('month', creado_en) = date_trunc('month', now()))\n                          / nullif(sum(importe) FILTER (WHERE date_trunc('month', creado_en) = date_trunc('month', now() - interval '1 month')), 0) - 100)), 0)\n                       FROM pedidos WHERE estado = 'pagado'),\n      'cpl', (SELECT round(coalesce(sum(gasto) / nullif(sum(leads), 0), 0), 2) FROM ads_diario WHERE fecha >= current_date - 30),\n      'aprobaciones', (SELECT count(*) FROM piezas WHERE estado = 'pendiente_aprobacion'),\n      'incidentes', (SELECT count(*) FROM incidentes WHERE NOT autorreparado AND resuelto_en IS NULL),\n      'en_pausa', coalesce((SELECT valor = 'si' FROM ajustes WHERE clave = 'pausa'), false)) AS kpis,\n    (SELECT coalesce(json_agg(json_build_array(to_char(t AT TIME ZONE 'Europe/Madrid', 'HH24:MI'), txt, nivel) ORDER BY t DESC), '[]'::json) FROM (\n       (SELECT publicado_en AS t, 'Publicado en ' || canal AS txt, 'ok' AS nivel FROM publicaciones ORDER BY publicado_en DESC LIMIT 5)\n       UNION ALL (SELECT creado_en, workflow || ' · ' || coalesce(nodo, ''), CASE WHEN autorreparado THEN 'warn' ELSE 'info' END FROM incidentes ORDER BY creado_en DESC LIMIT 5)\n       UNION ALL (SELECT fecha_alta, 'Nuevo lead · origen: ' || origen, 'info' FROM contactos ORDER BY fecha_alta DESC LIMIT 5)\n       ORDER BY 1 DESC LIMIT 8) x) AS actividad`, [$env.PRESUPUESTO_TOKENS_DIARIO_EUR || 5], 'uno'],\n  aprobaciones: [`SELECT id, canal, formato, sensible, to_char(creado_en AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS creado,\n      brief || CASE WHEN hashtags IS NOT NULL AND hashtags <> '' THEN E'\\n\\n' || hashtags ELSE '' END AS texto\n    FROM piezas WHERE estado = 'pendiente_aprobacion' ORDER BY creado_en LIMIT 50`, [], 'lista'],\n  decidir: [`WITH a AS (INSERT INTO aprobaciones (pieza_id, tipo_traspaso, enviado_en, respondido_en, decision, comentario, usuario)\n      VALUES ($1::uuid, 'contenido', now(), now(), $2, $3, 'app') RETURNING pieza_id)\n    UPDATE piezas SET estado = CASE $2 WHEN 'aprobar' THEN 'en_cola' WHEN 'descartar' THEN 'descartada' ELSE 'generando' END,\n      programado_para = least(programado_para, now() + interval '1 hour'), actualizado_en = now()\n    WHERE id = (SELECT pieza_id FROM a) RETURNING id`,\n    [uuid(datos.id), ['aprobar', 'cambiar', 'descartar'].includes(datos.decision) ? datos.decision : 'cambiar', String(datos.comentario || '').slice(0, 1000)], 'ok'],\n  agentes: [`SELECT p.agente_id AS id, p.agente AS nombre, 'v' || p.version AS version, round(coalesce(p.puntuacion_media, 0), 1) AS puntuacion,\n      count(e.id)::int AS ejecuciones_7d, round(coalesce(sum(e.coste_eur), 0), 2) AS coste_7d, p.estado\n    FROM prompts p LEFT JOIN ejecuciones_agente e ON e.agente_id = p.agente_id AND e.prompt_version = p.version AND e.creado_en >= now() - interval '7 days'\n    WHERE p.estado IN ('activa', 'candidata') GROUP BY p.agente_id, p.agente, p.version, p.puntuacion_media, p.estado ORDER BY p.agente_id`, [], 'lista'],\n  archivos: [`SELECT nombre_nuevo AS nombre, ruta, tipo, to_char(creado_en, 'DD/MM/YYYY') AS fecha FROM archivos\n    WHERE NOT sensible AND ($1 = '' OR nombre_nuevo ILIKE '%' || $1 || '%' OR ruta ILIKE '%' || $1 || '%' OR resumen ILIKE '%' || $1 || '%')\n    ORDER BY creado_en DESC LIMIT 30`, [String(datos.q || '').slice(0, 80)], 'lista'],\n  incidentes: [`SELECT id, workflow, nodo, left(error, 200) AS error, autorreparado, intentos, to_char(creado_en AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS cuando\n    FROM incidentes ORDER BY creado_en DESC LIMIT 30`, [], 'lista'],\n  incidente_reintentar: [`UPDATE incidentes SET proximo_reintento = now(), intentos = 0 WHERE id = $1::uuid RETURNING id`, [uuid(datos.id)], 'ok'],\n  leads: [`SELECT 'Lead #' || left(id::text, 6) AS nombre, score, estado, origen, to_char(fecha_alta, 'DD/MM') AS fecha\n    FROM contactos WHERE estado <> 'spam' ORDER BY fecha_alta DESC LIMIT 30`, [], 'lista'],\n  piloto: [`INSERT INTO ajustes (clave, valor) VALUES ('pausa', $1) ON CONFLICT (clave) DO UPDATE SET valor = excluded.valor, actualizado_en = now()\n    RETURNING CASE WHEN valor = 'si' THEN '⏸ En pausa: no se crea ni se publica nada hasta que digas «reanudar».' ELSE '▶️ Reanudado: vuelven la creación y la publicación automáticas.' END AS respuesta`,\n    [datos.pausa ? 'si' : 'no'], 'uno'],\n  medios: [`SELECT tipo, url, descripcion, to_char(creado_en AT TIME ZONE 'Europe/Madrid', 'DD/MM HH24:MI') AS fecha FROM (\n       SELECT tipo, $1 || '/webhook/medio?id=' || id AS url, coalesce(left(prompt, 140), '') AS descripcion, creado_en FROM medios\n       UNION ALL SELECT 'web', $1 || '/webhook/web?s=' || slug, coalesce(titulo, slug) || ' · ' || visitas || ' visitas', creado_en FROM webs\n       UNION ALL SELECT 'proyecto', CASE WHEN web_slug IS NULL THEN '' ELSE $1 || '/webhook/web?s=' || web_slug END, tipo || ': ' || nombre, creado_en FROM proyectos\n     ) x ORDER BY creado_en DESC LIMIT 40`, [String($env.WEBHOOK_URL || 'http://localhost:5678/').replace(/\\/$/, '')], 'lista'],\n  orden: [`INSERT INTO ordenes (texto, origen) VALUES ($1, 'app') RETURNING 'Orden registrada. El Director la procesará en el próximo ciclo (8:00, 13:00 o 19:00) y te pedirá aprobación si hace falta.' AS respuesta`,\n    [String(datos.texto || '').slice(0, 2000)], 'uno'],\n};\nconst HTTP = {\n  flujos: ['GET', `${API}/workflows?limit=100`, null, 'flujos'],\n  flujo_activar: ['POST', `${API}/workflows/${encodeURIComponent(String(datos.id || '').replace(/[^A-Za-z0-9]/g, ''))}/${datos.activo ? 'activate' : 'deactivate'}`, {}, 'ok'],\n  agente_ejecutar: ['POST', $env.AGENTE_WEBHOOK_URL || 'http://localhost:5678/webhook/omniagent-agente',\n    { agente_id: datos.agente_id, input: String(datos.input || '').slice(0, 8000), origen: 'app' }, 'uno'],\n};\nif (SQL[accion]) { const [sql, params, forma] = SQL[accion]; return [{ json: { tipo: 'sql', accion, sql, params, forma } }]; }\nconst CREAR = { imagen: ['generar_imagen', 'post'], portada: ['generar_imagen', 'portada'], miniatura: ['generar_imagen', 'miniatura'],\n  video: ['generar_video', 'vertical'], web: ['crear_web', ''], negocio: ['crear_negocio', 'negocio'], canal: ['crear_negocio', 'canal'] };\nif (accion === 'crear') {\n  const c = CREAR[datos.tipo];\n  const texto = String(datos.texto || '').trim().slice(0, 3000);\n  if (!c || !texto) return [{ json: { tipo: 'error', codigo: 400, r: { error: 'Indica qué crear y descríbelo' } } }];\n  return [{ json: { tipo: 'herramienta', accion, forma: 'herramienta', herramienta: { accion: c[0], formato: c[1], texto, id: '', decision: '', agente_id: '' } } }];\n}\nif (HTTP[accion]) {\n  if (accion !== 'agente_ejecutar' && !$env.N8N_API_KEY) return [{ json: { tipo: 'error', codigo: 503, r: { error: 'Falta N8N_API_KEY en el servidor' } } }];\n  const [metodo, url, cuerpo, forma] = HTTP[accion];\n  return [{ json: { tipo: 'http', accion, metodo, url, cuerpo, forma } }];\n}\nreturn [{ json: { tipo: 'error', codigo: 400, r: { error: 'Acción desconocida' } } }];\n"
+      },
+      "id": "126aa7b8-9b64-55f1-8a3e-001bf78ec279",
+      "name": "Validar y enrutar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f6c52c0a-f700-55be-b479-5713d97165ff",
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "sql",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b76c86d5-c44b-5c9e-93f2-3123fec555ad",
+      "name": "¿Consulta SQL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "db13150d-a863-5bb0-b1cd-7d58f5dfe7d5",
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "http",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "985c1b21-ec3a-513a-832f-26afe247522e",
+      "name": "¿Llamada HTTP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "466c7cdc-f3b9-5232-96b0-ceb018cf7318",
+              "leftValue": "={{ $json.tipo }}",
+              "rightValue": "herramienta",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {},
+        "query": "={{ $json.sql }}"
+      },
+      "id": "3311aeb6-e411-54d9-a70c-e60caade80d0",
+      "name": "¿Herramienta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $input.first().json.herramienta }];\n"
+      },
+      "id": "b662c7b3-b9cd-56ce-ae27-11539316121b",
+      "name": "Datos de la herramienta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniSYS21herrams",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "483587bd-4d3e-5e29-9e01-da8abd7dac71",
+      "name": "Crear",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        520
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "51997361-ad7f-5e07-9103-4014387d6f9e",
+      "name": "Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        660,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.metodo }}",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-KEY",
+              "value": "={{ $env.N8N_API_KEY || '' }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OMNIAGENT_CONTROL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo || {}) }}"
+      },
+      "id": "9c230f83-1618-5bbd-8933-52aa67dae0e1",
+      "name": "API de n8n / agente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        400
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Da a cada respuesta la forma que espera la app.\nconst ruta = $('Validar y enrutar').first().json;\nconst filas = $input.all().map((i) => i.json).filter((j) => j && Object.keys(j).length && !(Object.keys(j).length === 1 && j.success === true));\nlet r;\nif (ruta.forma === 'lista') r = filas;\nelse if (ruta.forma === 'uno') r = filas[0] || {};\nelse if (ruta.forma === 'herramienta') { const t = filas[0]?.resultado ?? ''; let d; try { d = JSON.parse(t); } catch (e) { d = t; }\n  r = typeof d === 'string' ? { respuesta: d } : { respuesta: d.respuesta || JSON.stringify(d), url: d.url || '', media_tipo: d.media_tipo || '' }; }\nelse if (ruta.forma === 'flujos') r = (filas[0]?.data || []).map((w) => ({ id: w.id, nombre: w.name, activo: w.active, ultima: (w.updatedAt || '').slice(0, 16).replace('T', ' '), estado: w.active ? 'ok' : 'pausado' }));\nelse r = { ok: true };\nreturn [{ json: { r } }];\n"
+      },
+      "id": "514c4e07-a09b-5469-9510-cf660d0ac552",
+      "name": "Formatear",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.r) }}",
+        "options": {}
+      },
+      "id": "498ca4aa-0772-5c7a-a0fc-8d63bea1cab1",
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.r) }}",
+        "options": {
+          "responseCode": "={{ $json.codigo }}"
+        }
+      },
+      "id": "b825ccbe-3153-57b6-90b2-de18196fa69f",
+      "name": "Responder error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook de control": {
+      "main": [
+        [
+          {
+            "node": "Validar y enrutar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y enrutar": {
+      "main": [
+        [
+          {
+            "node": "¿Consulta SQL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Consulta SQL?": {
+      "main": [
+        [
+          {
+            "node": "Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Llamada HTTP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Llamada HTTP?": {
+      "main": [
+        [
+          {
+            "node": "API de n8n / agente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Herramienta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Herramienta?": {
+      "main": [
+        [
+          {
+            "node": "Datos de la herramienta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos de la herramienta": {
+      "main": [
+        [
+          {
+            "node": "Crear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear": {
+      "main": [
+        [
+          {
+            "node": "Formatear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres": {
+      "main": [
+        [
+          {
+            "node": "Formatear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API de n8n / agente": {
+      "main": [
+        [
+          {
+            "node": "Formatear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

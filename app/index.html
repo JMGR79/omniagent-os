@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OmniAgent Control</title>
+<meta name="description" content="Centro de mando de OmniAgent OS: agentes, flujos, aprobaciones, documentos e incidentes desde cualquier dispositivo.">
+<meta name="theme-color" content="#0B1120">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OmniAgent">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="dot"></span>OmniAgent <b>Control</b></div>
+  <span class="modo" id="modo">DEMO</span>
+  <button class="icon" id="refrescar" aria-label="Actualizar">↻</button>
+</header>
+<nav class="side" id="nav">
+  <a href="#panel" data-v="panel"><i>◧</i><span>Panel</span></a>
+  <a href="#crear" data-v="crear"><i>✦</i><span>Crear</span></a>
+  <a href="#aprobaciones" data-v="aprobaciones"><i>✓</i><span>Aprobar</span><em id="badge-apr"></em></a>
+  <a href="#agentes" data-v="agentes"><i>◎</i><span>Agentes</span></a>
+  <a href="#flujos" data-v="flujos"><i>⇄</i><span>Flujos</span></a>
+  <a href="#archivos" data-v="archivos"><i>▤</i><span>Archivos</span></a>
+  <a href="#incidentes" data-v="incidentes"><i>!</i><span>Incidentes</span><em id="badge-inc"></em></a>
+  <a href="#leads" data-v="leads"><i>☺</i><span>Leads</span></a>
+  <a href="#ordenes" data-v="ordenes"><i>›_</i><span>Órdenes</span></a>
+  <a href="#ajustes" data-v="ajustes"><i>⚙</i><span>Ajustes</span></a>
+</nav>
+<main id="vista" tabindex="-1"></main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

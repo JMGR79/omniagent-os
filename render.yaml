@@ -1,0 +1,148 @@
+# Blueprint de Render · OmniAgent OS (EstrategIA Digital 3.0)
+# Crea la base de datos Postgres y el servicio n8n con todo preconfigurado.
+# Las claves marcadas con sync: false te las pide Render al desplegar (nunca van en el repositorio).
+databases:
+  - name: omniagent-db
+    plan: basic-256mb
+    region: frankfurt
+    postgresMajorVersion: "17"
+    databaseName: omniagent
+    user: omniagent
+
+services:
+  - type: web
+    name: omniagent-n8n
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # ── Base de datos (automático) ───────────────────────────────
+      - key: DB_TYPE
+        value: postgresdb
+      - key: DB_POSTGRESDB_HOST
+        fromDatabase: { name: omniagent-db, property: host }
+      - key: DB_POSTGRESDB_PORT
+        fromDatabase: { name: omniagent-db, property: port }
+      - key: DB_POSTGRESDB_DATABASE
+        fromDatabase: { name: omniagent-db, property: database }
+      - key: DB_POSTGRESDB_USER
+        fromDatabase: { name: omniagent-db, property: user }
+      - key: DB_POSTGRESDB_PASSWORD
+        fromDatabase: { name: omniagent-db, property: password }
+      - key: DB_POSTGRESDB_SCHEMA
+        value: n8n
+      # ── n8n ──────────────────────────────────────────────────────
+      - key: N8N_PORT
+        value: "5678"
+      - key: PORT
+        value: "5678"
+      - key: N8N_ENCRYPTION_KEY
+        generateValue: true
+      - key: N8N_BLOCK_ENV_ACCESS_IN_NODE
+        value: "false"
+      - key: GENERIC_TIMEZONE
+        value: Europe/Madrid
+      - key: TZ
+        value: Europe/Madrid
+      - key: N8N_DEFAULT_LOCALE
+        value: es
+      - key: N8N_DIAGNOSTICS_ENABLED
+        value: "false"
+      - key: N8N_RUNNERS_TASK_TIMEOUT
+        value: "300"
+      - key: EXECUTIONS_DATA_PRUNE
+        value: "true"
+      - key: EXECUTIONS_DATA_MAX_AGE
+        value: "168"
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
+      - key: NODE_FUNCTION_ALLOW_BUILTIN
+        value: crypto
+      # ── OmniAgent ────────────────────────────────────────────────
+      - key: OMNIAGENT_CONTROL_TOKEN
+        generateValue: true
+      - key: EMAIL_DUENO
+        sync: false
+      - key: GMAIL_USUARIO
+        sync: false
+      - key: MODO_AUTOMATICO
+        value: "true"
+      - key: CANALES_ACTIVOS
+        value: facebook,instagram,linkedin,x,tiktok,youtube
+      - key: PIEZAS_POR_CICLO
+        value: "3"
+      - key: PRESUPUESTO_TOKENS_DIARIO_EUR
+        value: "5"
+      - key: PROVEEDOR_IA
+        value: anthropic
+      - key: NOMBRE_NEGOCIO
+        value: EstrategIA Digital 3.0
+      # Fábrica de contenido: imágenes (openai o gemini) y vídeo (gemini = Veo, openai = Sora)
+      - key: PROVEEDOR_IMAGEN
+        sync: false
+      - key: PROVEEDOR_VIDEO
+        sync: false
+      - key: VIDEOS_POR_DIA
+        value: "1"
+      - key: IMAGEN_EN_TODAS
+        value: "false"
+      # ── Claves que pones tú en Render (no se guardan en GitHub) ──
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: META_PAGE_ID
+        sync: false
+      - key: META_PAGE_TOKEN
+        sync: false
+      - key: IG_USER_ID
+        sync: false
+      - key: N8N_API_KEY
+        sync: false
+      # ── WhatsApp (API oficial de WhatsApp Cloud, Meta) ───────────
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_ID
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_NUMERO_DUENO
+        sync: false
+      - key: WHATSAPP_PLANTILLA_AVISO
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        generateValue: true
+
+  # ── App de control (PWA instalable en móvil y escritorio) · sitio estático gratuito ──
+  - type: web
+    name: omniagent-control
+    runtime: static
+    buildCommand: echo "sin compilación"
+    staticPublishPath: ./app
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex
