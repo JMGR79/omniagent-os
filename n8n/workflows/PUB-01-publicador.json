@@ -1,0 +1,581 @@
+{
+  "id": "omniPUB01publica",
+  "name": "PUB-01 Publicador de redes",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "af64ee52-65b4-5720-b467-79b105835f5b",
+      "name": "Cada 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE piezas SET estado = 'publicando', intentos = intentos + 1, actualizado_en = now()\nWHERE id IN (SELECT id FROM piezas WHERE estado = 'en_cola' AND programado_para <= now()\n             AND NOT EXISTS (SELECT 1 FROM ajustes WHERE clave = 'pausa' AND valor = 'si')\n             ORDER BY programado_para LIMIT 5 FOR UPDATE SKIP LOCKED)\nRETURNING id, canal, formato, brief, hashtags, media_url, intentos, tema,\n  (SELECT m.tipo FROM medios m WHERE m.pieza_id = piezas.id ORDER BY m.creado_en DESC LIMIT 1) AS media_tipo",
+        "options": {}
+      },
+      "id": "f4ac6ed1-6d6b-5d4a-ba89-7f79a51586b9",
+      "name": "Reservar piezas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const p = it.json;\n  if (!p.id) continue;\n  let texto = String(p.brief || '').trim();\n  if (p.hashtags && !texto.includes(String(p.hashtags).trim())) texto += '\\n\\n' + String(p.hashtags).trim();\n  const corta = (t) => { if (t.length <= 280) return t; const c = t.slice(0, 277); return c.slice(0, Math.max(c.lastIndexOf(' '), 200)) + '…'; };\n  let tweets = [];\n  if (p.canal === 'x') {\n    const partes = /hilo/i.test(p.formato || '') ? String(p.brief || '').split(/\\n\\s*-{3,}\\s*\\n/).map((x) => x.trim()).filter(Boolean) : [String(p.brief || '').trim()];\n    if (p.hashtags && partes.length) partes[partes.length - 1] += ' ' + String(p.hashtags).trim();\n    tweets = partes.map(corta);\n    texto = tweets[0];\n  }\n  const media_tipo = p.media_tipo || (p.media_url ? 'imagen' : '');\n  out.push({ json: { id: p.id, canal: p.canal, texto, tweets, media_url: p.media_url || '', media_tipo, tema: p.tema || '' }, pairedItem: it.pairedItem });\n}\nreturn out;\n"
+      },
+      "id": "afcf375a-a84f-5e18-a4a9-cacdf2e56b6b",
+      "name": "Preparar texto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 7,
+        "output": "={{ (i => i < 0 ? 6 : i)([\"facebook\", \"instagram\", \"linkedin\", \"x\", \"telegram\", \"youtube\"].indexOf($json.canal)) }}"
+      },
+      "id": "b43564ec-29b9-515a-b6df-6decdcd15a73",
+      "name": "Canal",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.META_GRAPH_URL || 'https://graph.facebook.com') + '/' + ($env.META_API_VERSION || 'v21.0') + '/' + $env.META_PAGE_ID + ($json.media_tipo === 'video' ? '/videos' : $json.media_url ? '/photos' : '/feed') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.media_tipo === 'video' ? { file_url: $json.media_url, description: $json.texto, access_token: $env.META_PAGE_TOKEN } : $json.media_url ? { url: $json.media_url, message: $json.texto, access_token: $env.META_PAGE_TOKEN } : { message: $json.texto, access_token: $env.META_PAGE_TOKEN }) }}"
+      },
+      "id": "97cddb37-8654-53af-a8e0-e2989ad8db2b",
+      "name": "Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.META_GRAPH_URL || 'https://graph.facebook.com') + '/' + ($env.META_API_VERSION || 'v21.0') + '/' + $env.IG_USER_ID + '/media' }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.media_tipo === 'video' ? { media_type: 'REELS', video_url: $json.media_url, caption: $json.texto, share_to_feed: true, access_token: $env.META_PAGE_TOKEN } : { image_url: $json.media_url, caption: $json.texto, access_token: $env.META_PAGE_TOKEN }) }}"
+      },
+      "id": "9a3149e9-ff2a-5b9e-b9ef-b626cdfbe898",
+      "name": "Instagram · contenedor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        150
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.META_GRAPH_URL || 'https://graph.facebook.com') + '/' + ($env.META_API_VERSION || 'v21.0') + '/' + $env.IG_USER_ID + '/media_publish' }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ creation_id: $json.id || 'sin-contenedor', access_token: $env.META_PAGE_TOKEN }) }}"
+      },
+      "id": "bf1a9b67-a187-51e0-94ea-96973e7f08f5",
+      "name": "Instagram · publicar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        150
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c0ffee00-0000-4000-8000-000000000001",
+              "leftValue": "={{ $('Preparar texto').item.json.media_tipo }}",
+              "rightValue": "video",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b7b7b8b6-f53b-57c6-b6cf-a116e907ce45",
+      "name": "¿Es un reel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 90,
+        "unit": "seconds"
+      },
+      "id": "9f728285-33e8-5080-ad07-fcb70e469da7",
+      "name": "Procesar reel (90 s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1230,
+        60
+      ],
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000001500"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniPUB04youtube",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "15bf5138-5312-5583-a925-a7a5d10858ab",
+      "name": "YouTube",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        900
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniPUB02linkdin",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "468c6dd1-7c04-5c79-8905-a6100bd8887c",
+      "name": "LinkedIn",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniPUB03xtwittr",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "5fc7f2e0-8901-510c-9b1b-8b5be0e83272",
+      "name": "X",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        450
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage' }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CANAL_ID, text: $json.texto }) }}"
+      },
+      "id": "a6ae7d81-eafb-50ca-b372-0e631d5dae17",
+      "name": "Canal de Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        600
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((it) => ({ json: { error: { message: 'El canal ' + it.json.canal + ' no tiene publicación automática (requiere vídeo o subida manual)' } }, pairedItem: it.pairedItem }));\n"
+      },
+      "id": "9a86021e-749f-59e6-8574-a3dbb69407dc",
+      "name": "Sin publicador",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        750
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Preparar texto').item.json;\nconst j = $json;\nlet error = '';\nif (j.error) error = typeof j.error === 'string' ? j.error : (j.error.message || JSON.stringify(j.error));\nconst idExt = String(j.id || j.post_id || j.data?.id || j.urn || j.result?.message_id || '');\nif (!error && !idExt) error = 'Respuesta sin identificador de publicación: ' + JSON.stringify(j).slice(0, 300);\nconst subflujo = { linkedin: ['LinkedIn', 'PUB-02'], x: ['X', 'PUB-03'], youtube: ['YouTube', 'PUB-04'] }[p.canal];\nif (subflujo && /not active|no está activ|has issues|credential/i.test(error))\n  error = 'Cuenta de ' + subflujo[0] + ' sin conectar: abre ' + subflujo[1] + ' en n8n, conecta la cuenta y pulsa Publish. (' + error.slice(0, 120) + ')';\nlet url = '';\nif (!error) {\n  if (p.canal === 'facebook') url = 'https://www.facebook.com/' + idExt;\n  else if (p.canal === 'x') url = 'https://x.com/i/web/status/' + idExt;\n  else if (p.canal === 'linkedin') url = 'https://www.linkedin.com/feed/update/' + idExt;\n  else if (p.canal === 'youtube') url = 'https://youtube.com/shorts/' + idExt;\n}\nreturn { json: { params: [p.id, String(error).slice(0, 1000), idExt, url] } };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "c2ec75a7-fc25-5e94-8293-a9b617b5325f",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH p AS (\n  UPDATE piezas SET\n    estado = CASE WHEN $2 = '' THEN 'publicada' WHEN $2 LIKE 'El canal % no tiene publicación automática%' THEN 'requiere_video'\n                  WHEN intentos >= 3 THEN 'error' ELSE 'en_cola' END,\n    error = nullif($2, ''),\n    programado_para = CASE WHEN $2 = '' THEN programado_para ELSE now() + interval '30 minutes' END,\n    actualizado_en = now()\n  WHERE id = $1::uuid RETURNING id, canal, estado),\npub AS (INSERT INTO publicaciones (pieza_id, canal, id_externo, url)\n        SELECT id, canal, nullif($3, ''), nullif($4, '') FROM p WHERE $2 = '' RETURNING id),\ninc AS (INSERT INTO incidentes (workflow, workflow_id, nodo, error, intentos)\n        SELECT 'PUB-01 Publicador', 'omniPUB01publica', canal, $2, 3 FROM p WHERE estado = 'error' RETURNING id)\nSELECT (SELECT count(*) FROM pub)::int AS publicadas, (SELECT count(*) FROM inc)::int AS incidentes",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "6d74507e-ccd2-5d37-90a7-d0d33bc325ff",
+      "name": "Guardar resultado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "1d43334b-850a-5f3d-b403-f7e1ccc7f761",
+      "name": "Ejecutar ahora",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Cada 15 min": {
+      "main": [
+        [
+          {
+            "node": "Reservar piezas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar piezas": {
+      "main": [
+        [
+          {
+            "node": "Preparar texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar texto": {
+      "main": [
+        [
+          {
+            "node": "Canal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Canal": {
+      "main": [
+        [
+          {
+            "node": "Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Instagram · contenedor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "X",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Canal de Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin publicador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram · contenedor": {
+      "main": [
+        [
+          {
+            "node": "¿Es un reel?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es un reel?": {
+      "main": [
+        [
+          {
+            "node": "Procesar reel (90 s)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Instagram · publicar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar reel (90 s)": {
+      "main": [
+        [
+          {
+            "node": "Instagram · publicar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Facebook": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram · publicar": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "X": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Canal de Telegram": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin publicador": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultado": {
+      "main": [
+        [
+          {
+            "node": "Guardar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "Reservar piezas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

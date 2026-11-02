@@ -1,0 +1,159 @@
+{
+  "id": "omniTEL01telegrm",
+  "name": "TEL-01 Telegram del dueño",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "f6947d04-5a3c-5aab-b83e-52b92c99117f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "omniTelegram0001",
+          "name": "Telegram OmniAgent"
+        }
+      },
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000000c00"
+    },
+    {
+      "parameters": {
+        "jsCode": "const u = $input.first().json;\nconst dueno = String($env.TELEGRAM_CHAT_ID || '');\nconst uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nif (u.callback_query) {\n  const c = u.callback_query;\n  if (!dueno || String(c.from?.id) !== dueno) return [];\n  const [t, id] = String(c.data || '').split(':');\n  const decision = t === 'a' ? 'aprobar' : t === 'd' ? 'descartar' : '';\n  if (!decision || !uuid.test(id || '')) return [];\n  return [{ json: { tipo: 'decision', callback_id: c.id, chat_id: c.message?.chat?.id,\n    sql: \"WITH a AS (INSERT INTO aprobaciones (pieza_id, tipo_traspaso, enviado_en, respondido_en, decision, comentario, usuario) VALUES ($1::uuid, 'contenido', now(), now(), $2, '', 'telegram') RETURNING pieza_id) UPDATE piezas SET estado = CASE $2 WHEN 'aprobar' THEN 'en_cola' ELSE 'descartada' END, programado_para = least(programado_para, now() + interval '1 hour'), actualizado_en = now() WHERE id = (SELECT pieza_id FROM a) AND estado = 'pendiente_aprobacion' RETURNING id, estado\",\n    params: [id, decision], decision } }];\n}\nconst m = u.message;\nif (!m || !m.text) return [];\nconst texto = m.text.trim();\nif (texto === '/id' || texto === '/start') {\n  return [{ json: { tipo: 'info', chat_id: m.chat.id, sql: 'SELECT 1 AS ok', params: [],\n    aviso: 'Tu chat_id es ' + m.chat.id + (dueno ? '' : '. Ponlo en TELEGRAM_CHAT_ID para que OmniAgent te reconozca como dueño.') } }];\n}\nif (!dueno || String(m.chat.id) !== dueno) return [];\nreturn [{ json: { tipo: 'orden', chat_id: m.chat.id,\n  sql: \"INSERT INTO ordenes (texto, origen) VALUES ($1, 'telegram') RETURNING id\", params: [texto.slice(0, 2000)] } }];\n"
+      },
+      "id": "1084ee4f-4368-54c2-b793-293398ccfeca",
+      "name": "Interpretar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "e40cd1ef-2f39-5968-b08c-3770dbb194df",
+      "name": "Aplicar",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const i = $('Interpretar').first().json;\nconst fila = $input.first().json || {};\nif (i.tipo === 'decision') {\n  const txt = !fila.id ? 'Esta pieza ya estaba decidida' : i.decision === 'aprobar' ? '✅ Aprobada: se publicará en la próxima hora' : '🗑 Descartada';\n  return [{ json: { metodo: 'answerCallbackQuery', cuerpo: { callback_query_id: i.callback_id, text: txt } } },\n          { json: { metodo: 'sendMessage', cuerpo: { chat_id: i.chat_id, text: txt } } }];\n}\nif (i.tipo === 'info') return [{ json: { metodo: 'sendMessage', cuerpo: { chat_id: i.chat_id, text: i.aviso } } }];\nreturn [{ json: { metodo: 'sendMessage', cuerpo: { chat_id: i.chat_id,\n  text: '📝 Orden registrada. El Director la procesará en el próximo ciclo (8:00, 13:00 o 19:00) y te avisaré si hay algo que aprobar.' } } }];\n"
+      },
+      "id": "6fbb6d46-ecf4-5840-acd2-bf9c321e2afa",
+      "name": "Contestar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "4492d726-11b2-565b-b1ed-75cd9f193af7",
+      "name": "Responder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Telegram": {
+      "main": [
+        [
+          {
+            "node": "Interpretar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar": {
+      "main": [
+        [
+          {
+            "node": "Aplicar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar": {
+      "main": [
+        [
+          {
+            "node": "Contestar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contestar": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

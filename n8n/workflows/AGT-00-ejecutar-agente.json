@@ -1,0 +1,262 @@
+{
+  "id": "omniAGT00agentes",
+  "name": "AGT-00 Ejecutar agente",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "cbc88923-f938-5bcc-b507-1aaef7b08606",
+      "name": "Desde otro flujo",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "omniagent-agente",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "d3ff8c88-9bad-5ac1-bc5c-c381a7f16a7c",
+      "name": "Webhook agente",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000000a00"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Acepta llamadas de otros flujos (datos directos) o del webhook (con token).\nreturn $input.all().map((it) => {\n  const j = it.json;\n  let d = j;\n  if (j.headers && j.body !== undefined) {\n    const auth = String(j.headers.authorization || '').replace(/^Bearer\\s+/i, '');\n    if (!$env.OMNIAGENT_CONTROL_TOKEN || auth !== $env.OMNIAGENT_CONTROL_TOKEN) throw new Error('No autorizado');\n    d = j.body || {};\n  }\n  const agente_id = parseInt(d.agente_id, 10);\n  if (!(agente_id >= 0 && agente_id <= 16)) throw new Error('agente_id no válido: ' + d.agente_id);\n  const input = String(d.input || '').slice(0, 30000);\n  if (!input.trim()) throw new Error('El agente necesita un texto de entrada');\n  const max_tokens = Math.min(parseInt(d.max_tokens || 2000, 10) || 2000, 8000);\n  return { json: { agente_id, input, max_tokens, origen: String(d.origen || 'manual') } };\n});\n"
+      },
+      "id": "7079c5f7-2661-5f45-b994-96dac9ee1311",
+      "name": "Normalizar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.sistema, p.version, p.modelo,\n       (SELECT coalesce(sum(coste_eur), 0) FROM ejecuciones_agente WHERE creado_en::date = current_date) AS gastado_hoy\nFROM prompts p WHERE p.agente_id = $1::int AND p.estado = 'activa' ORDER BY p.version DESC LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ [$json.agente_id] }}"
+        }
+      },
+      "id": "0995e66f-93bf-5e6c-ba31-545e7c04eb41",
+      "name": "Prompt activo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const n = $('Normalizar').first().json;\nconst p = $input.first().json;\nif (!p.sistema) throw new Error('El agente ' + n.agente_id + ' no tiene un prompt activo');\nconst tope = parseFloat($env.PRESUPUESTO_TOKENS_DIARIO_EUR || '5');\nif (parseFloat(p.gastado_hoy) >= tope) throw new Error('Presupuesto diario de IA agotado (' + tope + ' EUR). Se reanuda mañana.');\n// Proveedor: anthropic (Claude), openai (ChatGPT) o gemini (Google). Se elige con PROVEEDOR_IA.\nconst prov = String($env.PROVEEDOR_IA || 'anthropic').toLowerCase();\nconst porDefecto = { anthropic: p.modelo || 'claude-sonnet-5-5', openai: 'gpt-5-mini', gemini: 'gemini-2.5-flash' };\nif (!porDefecto[prov]) throw new Error('PROVEEDOR_IA no válido: ' + prov + ' (usa anthropic, openai o gemini)');\nconst modelo = $env.MODELO_IA || porDefecto[prov];\nconst sistema = p.sistema + '\\nFecha y hora actuales (Madrid): ' + new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' }) + '.';\nlet url, cabeceras, cuerpo;\nif (prov === 'anthropic') {\n  if (!$env.ANTHROPIC_API_KEY) throw new Error('Falta ANTHROPIC_API_KEY');\n  url = ($env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com') + '/v1/messages';\n  cabeceras = { 'x-api-key': $env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' };\n  cuerpo = { model: modelo, max_tokens: n.max_tokens, system: sistema, messages: [{ role: 'user', content: n.input }] };\n} else if (prov === 'openai') {\n  if (!$env.OPENAI_API_KEY) throw new Error('Falta OPENAI_API_KEY');\n  url = ($env.OPENAI_BASE_URL || 'https://api.openai.com') + '/v1/chat/completions';\n  cabeceras = { Authorization: 'Bearer ' + $env.OPENAI_API_KEY };\n  cuerpo = { model: modelo, max_completion_tokens: n.max_tokens, messages: [{ role: 'system', content: sistema }, { role: 'user', content: n.input }] };\n} else {\n  if (!$env.GEMINI_API_KEY) throw new Error('Falta GEMINI_API_KEY');\n  url = ($env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com') + '/v1beta/models/' + encodeURIComponent(modelo) + ':generateContent';\n  cabeceras = { 'x-goog-api-key': $env.GEMINI_API_KEY };\n  cuerpo = { systemInstruction: { parts: [{ text: sistema }] }, contents: [{ role: 'user', parts: [{ text: n.input }] }],\n    generationConfig: { maxOutputTokens: n.max_tokens } };\n}\nreturn [{ json: { proveedor: prov, modelo, version: p.version, url, cabeceras, cuerpo } }];\n"
+      },
+      "id": "2683faba-5a27-5d03-ba2c-cc7808120fcc",
+      "name": "Preparar llamada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.cabeceras) }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "1822fa92-78b4-5ce9-bd9f-7f64a43706a6",
+      "name": "Modelo de IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst prep = $('Preparar llamada').first().json;\nconst n = $('Normalizar').first().json;\nlet texto = '', ent = 0, sal = 0, cortado = false;\nif (prep.proveedor === 'anthropic') {\n  texto = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\\n');\n  ent = r.usage?.input_tokens || 0; sal = r.usage?.output_tokens || 0; cortado = r.stop_reason === 'max_tokens';\n} else if (prep.proveedor === 'openai') {\n  texto = r.choices?.[0]?.message?.content || '';\n  ent = r.usage?.prompt_tokens || 0; sal = r.usage?.completion_tokens || 0; cortado = r.choices?.[0]?.finish_reason === 'length';\n} else {\n  texto = (r.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');\n  ent = r.usageMetadata?.promptTokenCount || 0; sal = r.usageMetadata?.candidatesTokenCount || 0; cortado = r.candidates?.[0]?.finishReason === 'MAX_TOKENS';\n}\ntexto = String(texto).trim();\nif (!texto) throw new Error('El modelo (' + prep.proveedor + ') no devolvió texto: ' + JSON.stringify(r).slice(0, 300));\n// Precios orientativos en EUR por millón de tokens; ajústalos con variables de entorno.\nconst pe = parseFloat($env.PRECIO_ENTRADA_EUR_MTOK || '3'), ps = parseFloat($env.PRECIO_SALIDA_EUR_MTOK || '15');\nconst coste = Math.round(((ent * pe + sal * ps) / 1e6) * 10000) / 10000;\nreturn [{ json: { respuesta: texto, agente_id: n.agente_id, version: prep.version, modelo: prep.proveedor + ':' + prep.modelo,\n  tokens_entrada: ent, tokens_salida: sal, coste_eur: coste, origen: n.origen, cortado } }];\n"
+      },
+      "id": "64819d56-7dd5-5361-982d-1ded6b38df2b",
+      "name": "Calcular coste",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ejecuciones_agente (agente_id, prompt_version, modelo, tokens_entrada, tokens_salida, coste_eur, origen)\nVALUES ($1::int, $2::int, $3, $4::int, $5::int, $6::numeric, $7) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [$json.agente_id, $json.version, $json.modelo, $json.tokens_entrada, $json.tokens_salida, $json.coste_eur, $json.origen] }}"
+        }
+      },
+      "id": "5834802a-4526-518a-9f3b-dddf99cd49e1",
+      "name": "Registrar ejecución",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1320,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $('Calcular coste').first().json;\nreturn [{ json: { respuesta: c.respuesta, agente_id: c.agente_id, coste_eur: c.coste_eur, cortado: c.cortado } }];\n"
+      },
+      "id": "8623ce28-39b8-5304-a7a7-e6adc0f3aa87",
+      "name": "Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Desde otro flujo": {
+      "main": [
+        [
+          {
+            "node": "Normalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook agente": {
+      "main": [
+        [
+          {
+            "node": "Normalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar": {
+      "main": [
+        [
+          {
+            "node": "Prompt activo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prompt activo": {
+      "main": [
+        [
+          {
+            "node": "Preparar llamada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar llamada": {
+      "main": [
+        [
+          {
+            "node": "Modelo de IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo de IA": {
+      "main": [
+        [
+          {
+            "node": "Calcular coste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular coste": {
+      "main": [
+        [
+          {
+            "node": "Registrar ejecución",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar ejecución": {
+      "main": [
+        [
+          {
+            "node": "Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

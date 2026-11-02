@@ -1,0 +1,102 @@
+{
+  "id": "omniPUB04youtube",
+  "name": "PUB-04 Publicar en YouTube",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "2a570d69-5a96-56cf-a00f-037be3e194ed",
+      "name": "Desde el publicador",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.media_url }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "4cb31744-929b-5f95-b2e5-37c8de7eee23",
+      "name": "Descargar vídeo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ ($('Desde el publicador').item.json.tema || $('Desde el publicador').item.json.texto.split('\\n')[0]).slice(0, 95) }}",
+        "regionCode": "ES",
+        "categoryId": "22",
+        "binaryProperty": "data",
+        "options": {
+          "description": "={{ $('Desde el publicador').item.json.texto.slice(0, 4800) + '\\n\\n#Shorts' }}",
+          "privacyStatus": "public",
+          "selfDeclaredMadeForKids": false,
+          "defaultLanguage": "es"
+        }
+      },
+      "id": "2a642ff4-95a4-50d8-97ae-358273094d1e",
+      "name": "YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Desde el publicador": {
+      "main": [
+        [
+          {
+            "node": "Descargar vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar vídeo": {
+      "main": [
+        [
+          {
+            "node": "YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

@@ -1,0 +1,403 @@
+{
+  "id": "omniVID01fabrica",
+  "name": "VID-01 Fábrica de vídeo",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "be8e5be1-076a-529d-a9d7-aad5b40c5333",
+      "name": "Cada 10 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!['gemini', 'openai'].includes(String($env.PROVEEDOR_VIDEO || '').toLowerCase())) return [];\nreturn [{ json: { max: parseInt($env.VIDEOS_POR_DIA || '1', 10) } }];\n"
+      },
+      "id": "50f7c799-ba14-52ec-8b90-5480ab62cea0",
+      "name": "¿Activada?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE piezas SET estado = 'generando_video', intentos = intentos + 1, actualizado_en = now()\nWHERE id = (SELECT id FROM piezas WHERE estado = 'requiere_video' AND media_url IS NULL AND intentos < 3\n              AND NOT EXISTS (SELECT 1 FROM ajustes WHERE clave = 'pausa' AND valor = 'si')\n              AND (SELECT count(*) FROM medios WHERE tipo = 'video' AND creado_en::date = current_date) < $1::int\n            ORDER BY programado_para LIMIT 1 FOR UPDATE SKIP LOCKED)\nRETURNING id, canal, formato, tema, brief",
+        "options": {
+          "queryReplacement": "={{ [$json.max] }}"
+        }
+      },
+      "id": "e4bed00c-9502-5ff7-a268-2874d3fba74c",
+      "name": "Elegir guion",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $input.first().json;\n// Sin guion pendiente, Postgres devuelve {success: true}: no se genera nada (Veo cuesta dinero).\nif (!p.id) return [];\nreturn [{ json: { agente_id: 5, max_tokens: 900, origen: 'VID-01', input:\n  'Convierte este guion en UN prompt para un generador de vídeo con IA (Veo o Sora): un vídeo vertical de 8 segundos con audio. ' +\n  'Escribe el prompt en inglés, describiendo el plano, el sujeto, el movimiento de cámara, la luz y el estilo (moderno, profesional, colores azul y blanco). ' +\n  'Incluye la locución en español de España entre comillas como lo que dice el narrador (como mucho 20 palabras). Nada de marcas registradas ni personas reales. ' +\n  'Responde SOLO con el prompt.\\n\\nTema: ' + (p.tema || '') + '\\nGuion:\\n' + String(p.brief || '').slice(0, 3000) } }];\n"
+      },
+      "id": "ac76e33e-691e-5534-904a-5ec4258a31c3",
+      "name": "Encargo de prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "99cea5d8-105f-5b9c-ab8f-c5cad23d5cc3",
+      "name": "Agente de vídeo",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Elegir guion').first().json;\nreturn [{ json: { prompt: String($input.first().json.respuesta || '').trim(), formato: 'vertical', pieza_id: p.id, avisar: false, titulo: p.tema } }];\n"
+      },
+      "id": "3dae7f74-80cd-5fb8-bb5d-03459c96ff20",
+      "name": "Pedido a Veo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniGEN02video00",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "8cba57f9-25d0-5c0b-b2e4-d8951b47b93b",
+      "name": "Generar vídeo",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Elegir guion').first().json;\nconst r = $input.first().json;\nif (r.error || !r.url) return [{ json: { params: [p.id, 'requiere_video', 'Vídeo no generado: ' + String(r.error?.message || r.error || 'sin respuesta').slice(0, 400)], p, url: '' } }];\n// YouTube, Instagram y Facebook se publican solos; TikTok exige subida manual (su API pide auditoría de la app).\nconst estado = p.canal === 'tiktok' ? 'listo_manual' : 'en_cola';\nreturn [{ json: { params: [p.id, estado, ''], p, url: r.url } }];\n"
+      },
+      "id": "0f7c2dda-ba86-5457-8653-af8cbd8b69b9",
+      "name": "Siguiente estado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE piezas SET estado = $2, error = nullif($3, ''), programado_para = CASE WHEN $2 = 'en_cola' THEN least(programado_para, now()) ELSE programado_para END, actualizado_en = now()\nWHERE id = $1::uuid RETURNING id, estado",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "be3ebb83-75d5-5e2a-a15d-e6a93d265351",
+      "name": "Actualizar pieza",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1760,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\n\nconst s = $('Siguiente estado').first().json;\nconst p = s.p;\nif (!s.url) return avisoTelegram('⚠ No se pudo generar el vídeo «' + (p.tema || p.canal) + '»: ' + s.params[2]);\nconst txt = p.canal === 'tiktok'\n  ? '🎬 Vídeo para TikTok listo: «' + (p.tema || '') + '». Descárgalo y súbelo desde la app de TikTok:\\n' + s.url + '\\n\\nTexto sugerido:\\n' + String(p.brief || '').slice(0, 600)\n  : '🎬 Vídeo listo para ' + p.canal + ' («' + (p.tema || '') + '»). Se publicará automáticamente.\\n' + s.url;\nreturn avisoTelegram(txt).map((x) => ({ json: Object.assign(x.json, { media_url: s.url, media_tipo: 'video' }) }));\n"
+      },
+      "id": "cb902b88-cb4f-5468-812d-2f3fd185abfb",
+      "name": "Aviso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -90
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        -90
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        90
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "1d43334b-850a-5f3d-b403-f7e1ccc7f761",
+      "name": "Ejecutar ahora",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Cada 10 min": {
+      "main": [
+        [
+          {
+            "node": "¿Activada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Activada?": {
+      "main": [
+        [
+          {
+            "node": "Elegir guion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Elegir guion": {
+      "main": [
+        [
+          {
+            "node": "Encargo de prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encargo de prompt": {
+      "main": [
+        [
+          {
+            "node": "Agente de vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente de vídeo": {
+      "main": [
+        [
+          {
+            "node": "Pedido a Veo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedido a Veo": {
+      "main": [
+        [
+          {
+            "node": "Generar vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar vídeo": {
+      "main": [
+        [
+          {
+            "node": "Siguiente estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Siguiente estado": {
+      "main": [
+        [
+          {
+            "node": "Actualizar pieza",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar pieza": {
+      "main": [
+        [
+          {
+            "node": "Aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aviso": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "¿Activada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

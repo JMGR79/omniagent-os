@@ -1,0 +1,480 @@
+{
+  "id": "omniCNT01directr",
+  "name": "CNT-01 Director de contenido",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8,13,19 * * *"
+            }
+          ]
+        }
+      },
+      "id": "4e3e2b7c-709f-5c22-87f6-25d0828d7704",
+      "name": "Ciclo 08 · 13 · 19 h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT coalesce(json_agg(json_build_object('id', id, 'texto', texto)), '[]'::json)\n     FROM (SELECT id, texto FROM ordenes WHERE estado = 'pendiente' ORDER BY creado_en LIMIT 10) o) AS ordenes,\n  (SELECT coalesce(json_agg(json_build_object('id', x.id, 'canal', x.canal, 'texto', x.brief, 'cambio', x.comentario)), '[]'::json)\n     FROM (SELECT p.id, p.canal, p.brief,\n             (SELECT a.comentario FROM aprobaciones a WHERE a.pieza_id = p.id ORDER BY a.respondido_en DESC NULLS LAST LIMIT 1) AS comentario\n           FROM piezas p WHERE p.estado = 'generando' ORDER BY p.actualizado_en LIMIT 5) x) AS rehacer,\n  (SELECT coalesce(json_agg(tema), '[]'::json) FROM (SELECT tema FROM piezas WHERE tema IS NOT NULL ORDER BY creado_en DESC LIMIT 30) t) AS temas_recientes,\n  (SELECT count(*) FROM piezas WHERE estado IN ('en_cola', 'pendiente_aprobacion'))::int AS en_cola,\n  coalesce((SELECT valor = 'si' FROM ajustes WHERE clave = 'pausa'), false) AS en_pausa",
+        "options": {}
+      },
+      "id": "547826a6-eb32-5fd7-912e-a5bc1e29283b",
+      "name": "Contexto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $input.first().json;\nif (c.en_pausa) return [];  // piloto automático en pausa (WhatsApp «pausar», app o IA)\nconst canales = String($env.CANALES_ACTIVOS || 'facebook,instagram,linkedin,x,tiktok,youtube')\n  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);\nconst porCiclo = parseInt($env.PIEZAS_POR_CICLO || '3', 10);\nconst maxCola = parseInt($env.PIEZAS_MAX_COLA || '20', 10);\nconst ordenes = c.ordenes || [], rehacer = c.rehacer || [];\nconst nuevas = c.en_cola >= maxCola ? 0 : porCiclo;\nif (!canales.length || (nuevas === 0 && !ordenes.length && !rehacer.length)) return [];\nconst reglas = {\n  facebook: 'Facebook: 300-800 caracteres, cercano, 1-3 emojis como mucho, pregunta final para comentar.',\n  instagram: 'Instagram: post con pie de foto de 600-1500 caracteres, 5-10 hashtags en el campo hashtags y un texto_imagen de máximo 6 palabras; o formato \"reel\" con un guion de 20-30 s con [TEXTO EN PANTALLA] y [VOZ].',\n  linkedin: 'LinkedIn: 700-1300 caracteres, tono profesional, primera línea gancho, sin hashtags en exceso (máximo 3).',\n  x: 'X: un tuit de máximo 260 caracteres (máximo 2 hashtags) o, si el tema lo merece, formato \"hilo\" de 4 a 7 tuits separados por una línea con --- (cada tuit de máximo 270 caracteres).',\n  telegram: 'Telegram: 300-900 caracteres, directo.',\n  tiktok: 'TikTok: guion de vídeo vertical de 30-45 s con [TEXTO EN PANTALLA] y [VOZ] por escenas.',\n  youtube: 'YouTube Shorts: guion de 30-50 s con [TEXTO EN PANTALLA] y [VOZ], más un título de máximo 70 caracteres en el campo tema.',\n};\nconst input = [\n  'Negocio: EstrategIA Digital 3.0 — consultoría y formación en inteligencia artificial, automatización y marketing digital para pymes y profesionales.',\n  'Canales activos: ' + canales.join(', ') + '.',\n  'Reglas por canal:\\n' + canales.map((k) => '- ' + (reglas[k] || k)).join('\\n'),\n  nuevas ? 'Crea ' + nuevas + ' piezas NUEVAS repartidas entre los canales activos (varía los temas: casos prácticos, errores comunes, herramientas, tutoriales breves, novedades de IA para negocio, llamadas a reservar una consultoría).' : 'No crees piezas nuevas: la cola está llena.',\n  ordenes.length ? 'Órdenes del dueño que debes cumplir (prioridad máxima):\\n' + ordenes.map((o) => '- [' + o.id + '] ' + o.texto).join('\\n') : '',\n  rehacer.length ? 'Piezas que el dueño pidió cambiar (devuélvelas con el mismo id):\\n' + rehacer.map((r) => '- id ' + r.id + ' (' + r.canal + '). Cambio pedido: ' + (r.cambio || 'mejorar') + '\\nTexto actual: ' + r.texto).join('\\n') : '',\n  'Temas recientes que NO debes repetir: ' + JSON.stringify(c.temas_recientes || []),\n  'Normas: español de España; no inventes cifras, estudios, clientes ni testimonios; nada de promesas de resultados garantizados; una sola llamada a la acción por pieza.',\n  'Responde SOLO con este JSON: {\"piezas\":[{\"id\":\"(solo si rehaces una pieza)\",\"canal\":\"uno de los canales activos\",\"formato\":\"post|carrusel|hilo|reel|short\",\"tema\":\"título breve\",\"texto\":\"texto final listo para publicar\",\"hashtags\":\"#uno #dos\",\"texto_imagen\":\"máx 6 palabras\",\"publicar_en_horas\":0,\"orden_id\":\"(id de la orden si responde a una)\"}],\"respuesta_ordenes\":\"qué has hecho con las órdenes, en una frase\"}',\n  'Usa publicar_en_horas entre 0 y 20 para repartir las publicaciones a lo largo del día.',\n].filter(Boolean).join('\\n\\n');\nreturn [{ json: { agente_id: 0, input, max_tokens: 8000, origen: 'CNT-01', _ordenes: ordenes.map((o) => o.id), _canales: canales } }];\n"
+      },
+      "id": "83ec86af-a2eb-5ad9-9037-e3838c7ac1f0",
+      "name": "Encargo al Director",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "ed4f79dc-56c4-5c8d-8ebd-17d6216f522a",
+      "name": "Director",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nconst enc = $('Encargo al Director').first().json;\nconst plan = jsonDeTexto($input.first().json.respuesta);\nconst piezas = (plan.piezas || []).filter((p) => p && enc._canales.includes(String(p.canal || '').toLowerCase()) && String(p.texto || '').trim());\nif (!piezas.length && !enc._ordenes.length) throw new Error('El Director no devolvió piezas válidas');\nconst input = 'Evalúa cada pieza. Responde SOLO JSON: {\"evaluaciones\":[{\"i\":0,\"puntuacion\":0,\"sensible\":false,\"motivo\":\"\"}]}\\n\\n' +\n  piezas.map((p, i) => '### Pieza ' + i + ' (' + p.canal + ')\\n' + p.texto + (p.hashtags ? '\\n' + p.hashtags : '')).join('\\n\\n');\nreturn [{ json: { agente_id: 8, input: piezas.length ? input : 'Sin piezas. Responde {\"evaluaciones\":[]}', max_tokens: 2000, origen: 'CNT-01',\n  _piezas: piezas, _respuesta_ordenes: plan.respuesta_ordenes || '' } }];\n"
+      },
+      "id": "2577a0ec-a0db-5a1c-bd9c-6d4fb4c9ecb7",
+      "name": "Preparar evaluación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "f7947b0c-3df7-5ba6-9e73-39444bfdb78b",
+      "name": "Evaluador",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nconst prev = $('Preparar evaluación').first().json;\nlet ev = [];\ntry { ev = jsonDeTexto($input.first().json.respuesta).evaluaciones || []; } catch (e) { ev = []; }\nconst auto = String($env.MODO_AUTOMATICO || 'true') === 'true';\nconst nota = parseFloat($env.PUNTUACION_MINIMA || '6');\nconst plantilla = $env.IMAGEN_PLANTILLA_URL || 'https://placehold.co/1080x1080/0B3D91/FFFFFF/jpeg?font=montserrat&text={texto}';\nconst ahora = Date.now();\nreturn prev._piezas.map((p, i) => {\n  const e = ev.find((x) => Number(x.i) === i) || { puntuacion: 0, sensible: true, motivo: 'Sin evaluación: revisar a mano' };\n  const canal = String(p.canal).toLowerCase();\n  const video = canal === 'tiktok' || canal === 'youtube' || (canal === 'instagram' && /reel|short|video/i.test(String(p.formato || '')));\n  let estado;\n  if (Number(e.puntuacion) < nota) estado = 'descartada';\n  else if (video) estado = 'requiere_video';\n  else if (e.sensible || !auto) estado = 'pendiente_aprobacion';\n  else estado = 'en_cola';\n  const horas = Math.max(0, Math.min(24, Number(p.publicar_en_horas) || 0));\n  const media = canal === 'instagram' && !video\n    ? plantilla.replace('{texto}', encodeURIComponent(String(p.texto_imagen || p.tema || 'EstrategIA Digital 3.0').slice(0, 60))) : '';\n  const id = /^[0-9a-f-]{36}$/i.test(String(p.id || '')) ? p.id : '';\n  const orden = /^[0-9a-f-]{36}$/i.test(String(p.orden_id || '')) ? p.orden_id : '';\n  return { json: { params: [id, canal, String(p.texto).trim(), String(p.hashtags || ''), media, !!e.sensible, estado,\n    new Date(ahora + horas * 3600e3).toISOString(), String(p.formato || 'post'), String(p.tema || '').slice(0, 200),\n    estado === 'descartada' ? 'Evaluador ' + e.puntuacion + '/10: ' + (e.motivo || '') : '', orden, String(p.texto_imagen || '').slice(0, 60)] } };\n});\n"
+      },
+      "id": "2bcc835f-5539-55e9-9d71-848ea4b82cd1",
+      "name": "Decidir estado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH upd AS (\n  UPDATE piezas SET brief = $3, hashtags = $4, media_url = nullif($5, ''), sensible = $6::boolean, estado = $7,\n         programado_para = $8::timestamptz, formato = $9, tema = $10, error = nullif($11, ''), texto_imagen = nullif($13, ''), actualizado_en = now()\n  WHERE $1 <> '' AND id = nullif($1, '')::uuid RETURNING id),\nins AS (\n  INSERT INTO piezas (canal, brief, hashtags, media_url, sensible, estado, programado_para, formato, tema, error, orden_id, texto_imagen)\n  SELECT $2, $3, $4, nullif($5, ''), $6::boolean, $7, $8::timestamptz, $9, $10, nullif($11, ''), nullif($12, '')::uuid, nullif($13, '')\n  WHERE NOT EXISTS (SELECT 1 FROM upd) RETURNING id)\nSELECT id, $7 AS estado, $2 AS canal, left($3, 700) AS texto, $10 AS tema, $13 AS texto_imagen FROM upd\nUNION ALL SELECT id, $7, $2, left($3, 700), $10, $13 FROM ins",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "4957b1a4-19d2-590f-81c4-f1dd063bc7fc",
+      "name": "Guardar piezas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1540,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const enc = $('Encargo al Director').first().json;\nconst ev = $('Preparar evaluación').first().json;\nif (!enc._ordenes.length) return [];\nreturn [{ json: { ids: enc._ordenes.join(','), resultado: ev._respuesta_ordenes || 'Procesada por el Director' } }];\n"
+      },
+      "id": "c63b5750-351c-5e7c-a6ca-0fdc4f0618fe",
+      "name": "Cerrar órdenes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE ordenes SET estado = 'hecha', resultado = $2, actualizado_en = now()\nWHERE id = ANY(string_to_array($1, ',')::uuid[]) RETURNING id",
+        "options": {
+          "queryReplacement": "={{ [$json.ids, $json.resultado] }}"
+        }
+      },
+      "id": "d31017ac-536e-5846-bba1-3061115f027f",
+      "name": "Marcar órdenes hechas",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1980,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\n\nconst filas = $input.all().map((i) => i.json).filter((f) => f.id);\nconst out = [];\nfor (const f of filas) {\n  if (f.estado === 'pendiente_aprobacion') {\n    out.push(...avisoTelegram('🟡 Pieza para aprobar · ' + f.canal + '\\n' + (f.tema ? '«' + f.tema + '»\\n\\n' : '') + f.texto,\n      [[{ text: '✅ Aprobar', callback_data: 'a:' + f.id }, { text: '🗑 Descartar', callback_data: 'd:' + f.id }]]));\n  } else if (f.estado === 'requiere_video') {\n    out.push(...avisoTelegram('🎬 Guion de vídeo listo para grabar · ' + f.canal + '\\n' + (f.tema ? '«' + f.tema + '»\\n\\n' : '') + f.texto));\n  }\n}\nreturn out;\n"
+      },
+      "id": "0fc95eaa-41a1-5142-898e-2569cc3acf97",
+      "name": "Avisos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Con PROVEEDOR_IMAGEN configurado, cada post de Instagram (y de Facebook si IMAGEN_EN_TODAS=true) lleva una imagen generada.\nif (!$env.PROVEEDOR_IMAGEN) return [];\nconst todas = String($env.IMAGEN_EN_TODAS || 'false') === 'true';\nreturn $input.all().map((i) => i.json).filter((f) => f.id && !['descartada', 'requiere_video'].includes(f.estado)\n    && (f.canal === 'instagram' || (todas && f.canal === 'facebook')))\n  .map((f) => ({ json: { pieza_id: f.id, tipo: 'post', formato: 'cuadrado', tema: f.tema || f.texto.slice(0, 300), texto_imagen: f.texto_imagen || '' } }));\n"
+      },
+      "id": "1898e7f9-18b7-557b-92a6-25dc1431ded5",
+      "name": "¿Imágenes?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniGEN01imagen0",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "84ee3e51-3812-58a1-8bc4-85daa5f242a6",
+      "name": "Generar imágenes",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        30
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        30
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        210
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "1d43334b-850a-5f3d-b403-f7e1ccc7f761",
+      "name": "Ejecutar ahora",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Ciclo 08 · 13 · 19 h": {
+      "main": [
+        [
+          {
+            "node": "Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contexto": {
+      "main": [
+        [
+          {
+            "node": "Encargo al Director",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encargo al Director": {
+      "main": [
+        [
+          {
+            "node": "Director",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Director": {
+      "main": [
+        [
+          {
+            "node": "Preparar evaluación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar evaluación": {
+      "main": [
+        [
+          {
+            "node": "Evaluador",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cerrar órdenes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluador": {
+      "main": [
+        [
+          {
+            "node": "Decidir estado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir estado": {
+      "main": [
+        [
+          {
+            "node": "Guardar piezas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar piezas": {
+      "main": [
+        [
+          {
+            "node": "Avisos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Imágenes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cerrar órdenes": {
+      "main": [
+        [
+          {
+            "node": "Marcar órdenes hechas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Imágenes?": {
+      "main": [
+        [
+          {
+            "node": "Generar imágenes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisos": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

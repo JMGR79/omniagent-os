@@ -1,0 +1,298 @@
+{
+  "id": "omniGEN03webs000",
+  "name": "GEN-03 Crear web",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "e7c85b07-0629-5c2e-a6d7-fa8e91936314",
+      "name": "Crear web",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const BASE = String($env.WEBHOOK_URL || $env.N8N_EDITOR_BASE_URL || 'http://localhost:5678/').replace(/\\/$/, '');\n\nconst j = $input.first().json;\nconst encargo = String(j.encargo || j.texto || '').trim();\nif (!encargo) throw new Error('Falta el encargo de la web');\nconst slug = (String(j.slug || encargo).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'web')\n  + (j.slug ? '' : '-' + Math.random().toString(36).slice(2, 6));\nconst input = 'Crea una landing page para este encargo:\\n' + encargo + '\\n\\n' +\n  (j.imagen_url ? 'Usa esta imagen de cabecera (etiqueta img con alt descriptivo): ' + j.imagen_url + '\\n' : '') +\n  'El formulario de contacto debe tener method=\"post\", action=\"' + BASE + '/webhook/lead\", campos con name=\"nombre\", name=\"email\", name=\"telefono\", name=\"mensaje\", ' +\n  'un campo oculto name=\"web\" value=\"' + slug + '\" y un campo trampa anti-spam name=\"empresa_web\" oculto con la clase \"hidden\". ' +\n  'Incluye un pie con aviso legal y política de privacidad básicos (RGPD) y una casilla obligatoria de aceptación de la privacidad.';\nreturn [{ json: { agente_id: 15, input, max_tokens: 8000, origen: 'GEN-03', _slug: slug, _titulo: String(j.titulo || encargo).slice(0, 120),\n  _proyecto: j.proyecto_id || '', _avisar: !!j.avisar } }];\n"
+      },
+      "id": "a8724c71-3ecd-5b75-b5dc-17188e86ebb0",
+      "name": "Encargo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "d2f03fa0-d747-513b-961a-4a347ea8f416",
+      "name": "Diseñador web",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $('Encargo').first().json;\nlet html = String($input.first().json.respuesta || '').replace(/^```(?:html)?\\s*/i, '').replace(/```\\s*$/, '').trim();\nconst i = html.search(/<!doctype html|<html/i);\nif (i < 0) throw new Error('El diseñador web no devolvió HTML');\nhtml = html.slice(i);\nconst titulo = (html.match(/<title>([^<]*)<\\/title>/i) || [])[1] || e._titulo;\nreturn [{ json: { params: [e._slug, titulo.slice(0, 200), html, e._proyecto] } }];\n"
+      },
+      "id": "0a9fcdfa-6821-52ce-a710-6df7df944d4e",
+      "name": "Limpiar HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO webs (slug, titulo, html, proyecto_id) VALUES ($1, $2, $3, nullif($4, '')::uuid)\nON CONFLICT (slug) DO UPDATE SET html = excluded.html, titulo = excluded.titulo, actualizado_en = now() RETURNING slug, titulo",
+        "options": {
+          "queryReplacement": "={{ $json.params }}"
+        }
+      },
+      "id": "ea625866-1d40-5e57-a5fc-6e96ca086047",
+      "name": "Guardar web",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "omniPostgres0001",
+          "name": "Postgres OmniAgent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const BASE = String($env.WEBHOOK_URL || $env.N8N_EDITOR_BASE_URL || 'http://localhost:5678/').replace(/\\/$/, '');\n\nconst e = $('Encargo').first().json;\nconst w = $input.first().json;\nreturn [{ json: { slug: w.slug, titulo: w.titulo, url: BASE + '/webhook/web?s=' + w.slug, avisar: e._avisar } }];\n"
+      },
+      "id": "242a3713-e9f3-5e87-80f3-87cf119500bd",
+      "name": "Dirección pública",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aviso genérico para el dueño: después sale por Telegram y por WhatsApp (los que estén configurados).\n// teclado: [[{ text, callback_data }]] → botones [{ id, titulo }]\nfunction avisoTelegram(texto, teclado) {\n  const botones = teclado ? teclado.flat().map((b) => ({ id: b.callback_data, titulo: b.text })) : null;\n  return [{ json: { texto: String(texto).slice(0, 4000), botones } }];\n}\n\nconst d = $('Dirección pública').first().json;\nreturn d.avisar ? avisoTelegram('🌐 Web publicada: ' + d.titulo + '\\n' + d.url + '\\n\\nLos contactos del formulario te llegarán como leads.') : [];\n"
+      },
+      "id": "fd7cb98b-e81b-522f-a103-d1207950bef7",
+      "name": "Avisar si toca",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -150
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Dirección pública').all().map((it) => ({ json: it.json }));\n"
+      },
+      "id": "c2ec75a7-fc25-5e94-8293-a9b617b5325f",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+      },
+      "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
+      "name": "A Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "763bc73e-b839-5c19-aca5-e8782280ab5f",
+      "name": "Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -240
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniWA02enviarms",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "399c8c0b-9165-5e62-9c29-0a3455c09bab",
+      "name": "WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        -60
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Crear web": {
+      "main": [
+        [
+          {
+            "node": "Encargo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encargo": {
+      "main": [
+        [
+          {
+            "node": "Diseñador web",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diseñador web": {
+      "main": [
+        [
+          {
+            "node": "Limpiar HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar HTML": {
+      "main": [
+        [
+          {
+            "node": "Guardar web",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar web": {
+      "main": [
+        [
+          {
+            "node": "Dirección pública",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dirección pública": {
+      "main": [
+        [
+          {
+            "node": "Avisar si toca",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar si toca": {
+      "main": [
+        [
+          {
+            "node": "A Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A Telegram": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

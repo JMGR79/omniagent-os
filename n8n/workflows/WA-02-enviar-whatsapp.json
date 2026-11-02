@@ -1,0 +1,163 @@
+{
+  "id": "omniWA02enviarms",
+  "name": "WA-02 Enviar WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "bf8d05c6-e443-57cc-b662-8697e5ca10e6",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$env.WHATSAPP_TOKEN || !$env.WHATSAPP_PHONE_ID) return [];\nconst num = (s) => String(s || '').replace(/\\D/g, '');\nconst out = [];\nfor (const it of $input.all()) {\n  const j = it.json;\n  const to = num(j.to || $env.WHATSAPP_NUMERO_DUENO);\n  if (!to || !String(j.texto || '').trim()) continue;\n  const botones = (j.botones || []).slice(0, 3);\n  const texto = String(j.texto).slice(0, botones.length ? 1000 : 4000);\n  const media = !botones.length && j.media_url && ['imagen', 'video'].includes(j.media_tipo) ? (j.media_tipo === 'imagen' ? 'image' : 'video') : '';\n  const cuerpo = media\n    ? { messaging_product: 'whatsapp', to, type: media, [media]: { link: j.media_url, caption: texto.slice(0, 1024) } }\n    : botones.length\n    ? { messaging_product: 'whatsapp', to, type: 'interactive', interactive: { type: 'button', body: { text: texto },\n        action: { buttons: botones.map((b) => ({ type: 'reply', reply: { id: String(b.id).slice(0, 256), title: String(b.titulo).slice(0, 20) } })) } } }\n    : { messaging_product: 'whatsapp', to, type: 'text', text: { body: texto, preview_url: false } };\n  out.push({ json: { to, texto, cuerpo } });\n}\nreturn out;\n"
+      },
+      "id": "9fa20325-3cce-5423-a310-c810a66c9ef6",
+      "name": "Preparar mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.META_GRAPH_URL || 'https://graph.facebook.com') + '/' + ($env.META_API_VERSION || 'v21.0') + '/' + $env.WHATSAPP_PHONE_ID + '/messages' }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "81483b49-e175-5ecd-9733-e9c76f57e9cb",
+      "name": "Enviar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Error 131047: han pasado más de 24 h desde el último mensaje del destinatario.\nconst out = [];\nconst num = (s) => String(s || '').replace(/\\D/g, '');\n$input.all().forEach((it, i) => {\n  const p = $('Preparar mensaje').all()[i]?.json;\n  if (!p || !it.json.error) return;\n  const fuera24h = /131047|re-engagement|24 hours/i.test(JSON.stringify(it.json.error));\n  if (!fuera24h || !$env.WHATSAPP_PLANTILLA_AVISO || p.to !== num($env.WHATSAPP_NUMERO_DUENO)) return;\n  const texto = String(p.texto).replace(/\\s*\\n+\\s*/g, ' · ').replace(/\\s{4,}/g, ' ').slice(0, 1000);\n  out.push({ json: { cuerpo: { messaging_product: 'whatsapp', to: p.to, type: 'template', template: {\n    name: $env.WHATSAPP_PLANTILLA_AVISO, language: { code: $env.WHATSAPP_PLANTILLA_IDIOMA || 'es' },\n    components: [{ type: 'body', parameters: [{ type: 'text', text: texto }] }] } } } });\n});\nreturn out;\n"
+      },
+      "id": "b82e60a6-88ff-56af-aebe-78da8960feaa",
+      "name": "¿Hace falta plantilla?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.META_GRAPH_URL || 'https://graph.facebook.com') + '/' + ($env.META_API_VERSION || 'v21.0') + '/' + $env.WHATSAPP_PHONE_ID + '/messages' }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.WHATSAPP_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "fea5da78-8520-5f4e-87ab-d454b745ea98",
+      "name": "Enviar plantilla",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Preparar mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar mensaje": {
+      "main": [
+        [
+          {
+            "node": "Enviar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar": {
+      "main": [
+        [
+          {
+            "node": "¿Hace falta plantilla?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hace falta plantilla?": {
+      "main": [
+        [
+          {
+            "node": "Enviar plantilla",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Madrid",
+    "saveManualExecutions": true,
+    "errorWorkflow": "omniSYS00errores"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
