@@ -1,0 +1,71 @@
+# OmniAgent OS · montaje gratuito de vídeos en GitHub Actions.
+# n8n (GEN-02) lanza este flujo con el trabajo de montaje y la URL de reanudación de su ejecución;
+# aquí se generan las imágenes (Cloudflare), se monta el vídeo con ffmpeg y se devuelve a n8n.
+# Secretos del repositorio: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN y MONTAJE_TOKEN (el mismo valor que en Render).
+name: Montar vídeo (OmniAgent)
+
+on:
+  workflow_dispatch:
+    inputs:
+      trabajo:
+        description: Trabajo de montaje (JSON en base64)
+        required: true
+      respuesta:
+        description: URL de n8n donde se entrega el vídeo
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  montar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/montar.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Comprobar la URL de entrega
+        env:
+          RESPUESTA: ${{ inputs.respuesta }}
+        run: |
+          # Solo se entrega a una URL de reanudación de n8n (…/webhook-waiting/<ejecución>)
+          echo "$RESPUESTA" | grep -Eq '^https://[A-Za-z0-9.-]+/webhook-waiting/[0-9]+$' || { echo "URL de entrega no válida"; exit 1; }
+
+      - name: Instalar ffmpeg y la fuente
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core > /dev/null
+
+      - name: Montar el vídeo
+        env:
+          TRABAJO: ${{ inputs.trabajo }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NOMBRE_NEGOCIO: ${{ vars.NOMBRE_NEGOCIO || 'EstrategIA Digital 3.0' }}
+          OMNI_FUENTE: /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+          OMNI_MONTAJE_SALIDA: ${{ runner.temp }}/video.mp4
+        run: node scripts/montar.mjs "$TRABAJO"
+
+      - name: Entregar el vídeo a OmniAgent
+        env:
+          RESPUESTA: ${{ inputs.respuesta }}
+          MONTAJE_TOKEN: ${{ secrets.MONTAJE_TOKEN }}
+          VIDEO: ${{ runner.temp }}/video.mp4
+          CARGA: ${{ runner.temp }}/entrega.json
+        run: |
+          node -e "const fs=require('fs');fs.writeFileSync(process.env.CARGA,JSON.stringify({token:process.env.MONTAJE_TOKEN,video:fs.readFileSync(process.env.VIDEO).toString('base64')}))"
+          curl -sS --fail --max-time 120 -X POST -H 'content-type: application/json' --data-binary "@$CARGA" "$RESPUESTA" > /dev/null
+          echo "Vídeo entregado ($(stat -c %s "$VIDEO") bytes)"
+
+      - name: Avisar a OmniAgent del fallo
+        if: failure()
+        env:
+          RESPUESTA: ${{ inputs.respuesta }}
+          MONTAJE_TOKEN: ${{ secrets.MONTAJE_TOKEN }}
+        run: |
+          echo "$RESPUESTA" | grep -Eq '^https://[A-Za-z0-9.-]+/webhook-waiting/[0-9]+$' || exit 0
+          node -e "console.log(JSON.stringify({token:process.env.MONTAJE_TOKEN,error:'El montaje falló en GitHub Actions; revisa el registro del flujo «Montar vídeo».'}))" \
+            | curl -sS --max-time 60 -X POST -H 'content-type: application/json' --data-binary @- "$RESPUESTA" > /dev/null || true
