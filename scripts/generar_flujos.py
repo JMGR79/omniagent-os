@@ -1602,9 +1602,10 @@ return $input.all().map((it) => {
     cuerpo = { instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: { cuadrado: '1:1', vertical: '9:16', horizontal: '16:9' }[formato] } };
   } else if (prov === 'cloudflare') {
     // Cloudflare Workers AI (FLUX): incluye una cuota diaria gratuita. La imagen sale cuadrada.
-    if (!$env.CLOUDFLARE_ACCOUNT_ID || !$env.CLOUDFLARE_API_TOKEN) throw new Error('Faltan CLOUDFLARE_ACCOUNT_ID o CLOUDFLARE_API_TOKEN');
-    url = 'https://api.cloudflare.com/client/v4/accounts/' + encodeURIComponent($env.CLOUDFLARE_ACCOUNT_ID) + '/ai/run/' + ($env.MODELO_IMAGEN || '@cf/black-forest-labs/flux-1-schnell');
-    cab = { Authorization: 'Bearer ' + $env.CLOUDFLARE_API_TOKEN };
+    const cuenta = String($env.CLOUDFLARE_ACCOUNT_ID || '').trim(), tokenCf = String($env.CLOUDFLARE_API_TOKEN || '').trim();
+    if (!cuenta || !tokenCf) throw new Error('Faltan CLOUDFLARE_ACCOUNT_ID o CLOUDFLARE_API_TOKEN');
+    url = 'https://api.cloudflare.com/client/v4/accounts/' + encodeURIComponent(cuenta) + '/ai/run/' + ($env.MODELO_IMAGEN || '@cf/black-forest-labs/flux-1-schnell');
+    cab = { Authorization: 'Bearer ' + tokenCf };
     cuerpo = { prompt: prompt.slice(0, 2000), steps: 8 };
   } else throw new Error('PROVEEDOR_IMAGEN no válido: ' + prov + ' (usa cloudflare, openai o gemini)');
   return { json: { url, cab, cuerpo, prompt, pieza_id: j.pieza_id || '' } };
