@@ -57,8 +57,9 @@ services:
         value: "true"
       - key: EXECUTIONS_DATA_MAX_AGE
         value: "168"
+      # Límite de memoria de n8n: deja margen para el montaje de vídeo (plan Starter, 512 MB)
       - key: NODE_OPTIONS
-        value: --max-old-space-size=384
+        value: --max-old-space-size=320
       - key: NODE_FUNCTION_ALLOW_BUILTIN
         value: crypto
       # Permite el nodo «Execute Command» (n8n 2 lo desactiva por defecto): lo usa el montaje de vídeo
