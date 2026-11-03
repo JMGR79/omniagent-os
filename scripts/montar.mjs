@@ -43,13 +43,16 @@ function partir(texto, max) {
 }
 
 async function imagenCloudflare(prompt, destino) {
-  if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_API_TOKEN || !prompt) return false;
+  // Se quitan espacios y tabuladores que se cuelan al pegar los secretos
+  const cuenta = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+  const token = String(env.CLOUDFLARE_API_TOKEN || '').trim();
+  if (!cuenta || !token || !prompt) return false;
   const modelo = env.MODELO_IMAGEN_MONTAJE || '@cf/black-forest-labs/flux-1-schnell';
   const estilo = env.ESTILO_MARCA || 'modern, professional, deep blue #0B3D91 and white with yellow accents, clean composition, high contrast';
   try {
-    const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CLOUDFLARE_ACCOUNT_ID)}/ai/run/${modelo}`, {
+    const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cuenta)}/ai/run/${modelo}`, {
       method: 'POST',
-      headers: { Authorization: 'Bearer ' + env.CLOUDFLARE_API_TOKEN, 'content-type': 'application/json' },
+      headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' },
       body: JSON.stringify({ prompt: (prompt + '. ' + estilo + '. No text, no letters, no logos.').slice(0, 2000), steps: 8 }),
       signal: AbortSignal.timeout(120000),
     });
