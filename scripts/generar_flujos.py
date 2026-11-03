@@ -164,16 +164,44 @@ def con_avisos(nodos, conexiones, origen, x, y):
     nodos.append(code("A Telegram", r"""
 if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];
 return $input.all().map((it) => {
-  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };
-  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };
+  const j = it.json;
+  const texto = String(j.texto);
+  const teclado = j.botones?.length ? { inline_keyboard: [j.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] } : null;
+  // Si el aviso trae un vídeo o una imagen, se envía como archivo para verlo dentro de Telegram
+  // (Telegram lo descarga de la URL pública; el texto va como pie, con el enlace por si acaso).
+  if (j.media_url && ['video', 'imagen'].includes(j.media_tipo)) {
+    const campo = j.media_tipo === 'video' ? 'video' : 'photo';
+    const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, [campo]: j.media_url, caption: texto.slice(0, 1024) };
+    if (campo === 'video') cuerpo.supports_streaming = true;
+    if (teclado) cuerpo.reply_markup = teclado;
+    return { json: { metodo: campo === 'video' ? 'sendVideo' : 'sendPhoto', cuerpo } };
+  }
+  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: texto.slice(0, 4000), disable_web_page_preview: true };
+  if (teclado) cuerpo.reply_markup = teclado;
   return { json: { metodo: 'sendMessage', cuerpo } };
 });
 """, (x, y - 90)))
     nodos.append(telegram_http("Telegram", (x + 220, y - 90)))
+    # Si Telegram no pudo descargar el vídeo o la imagen, se manda el aviso como texto con el enlace
+    nodos.append(code("Respaldo de texto", r"""
+const enviados = $('A Telegram').all();
+return $input.all().flatMap((it, i) => {
+  const orig = enviados[i]?.json;
+  if (!orig || orig.metodo === 'sendMessage' || it.json.ok === true) return [];
+  const c = orig.cuerpo;
+  const enlace = c.video || c.photo || '';
+  const texto = String(c.caption || '') + (enlace && !String(c.caption || '').includes(enlace) ? '\n' + enlace : '');
+  const cuerpo = { chat_id: c.chat_id, text: texto.slice(0, 4000), disable_web_page_preview: true };
+  if (c.reply_markup) cuerpo.reply_markup = c.reply_markup;
+  return [{ json: { metodo: 'sendMessage', cuerpo } }];
+});
+""", (x + 440, y - 90)))
+    nodos.append(telegram_http("Telegram (texto)", (x + 660, y - 90)))
     nodos.append(nodo("WhatsApp", "n8n-nodes-base.executeWorkflow", 1.1, {
         "source": "database", "workflowId": {"__rl": True, "value": ID["WA02"], "mode": "id"},
         "mode": "each", "options": {"waitForSubWorkflow": True}}, (x, y + 90), onError="continueRegularOutput"))
-    for a, b in ((origen, "A Telegram"), (origen, "WhatsApp"), ("A Telegram", "Telegram")):
+    for a, b in ((origen, "A Telegram"), (origen, "WhatsApp"), ("A Telegram", "Telegram"),
+                 ("Telegram", "Respaldo de texto"), ("Respaldo de texto", "Telegram (texto)")):
         ramas = conexiones.setdefault(a, {"main": [[]]})["main"]
         ramas[0].append({"node": b, "type": "main", "index": 0})
 

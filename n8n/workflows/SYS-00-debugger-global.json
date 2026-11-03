@@ -65,7 +65,7 @@
     },
     {
       "parameters": {
-        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: String(it.json.texto).slice(0, 4000), disable_web_page_preview: true };\n  if (it.json.botones?.length) cuerpo.reply_markup = { inline_keyboard: [it.json.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] };\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
+        "jsCode": "if (!$env.TELEGRAM_BOT_TOKEN || !$env.TELEGRAM_CHAT_ID) return [];\nreturn $input.all().map((it) => {\n  const j = it.json;\n  const texto = String(j.texto);\n  const teclado = j.botones?.length ? { inline_keyboard: [j.botones.map((b) => ({ text: b.titulo, callback_data: b.id }))] } : null;\n  // Si el aviso trae un vídeo o una imagen, se envía como archivo para verlo dentro de Telegram\n  // (Telegram lo descarga de la URL pública; el texto va como pie, con el enlace por si acaso).\n  if (j.media_url && ['video', 'imagen'].includes(j.media_tipo)) {\n    const campo = j.media_tipo === 'video' ? 'video' : 'photo';\n    const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, [campo]: j.media_url, caption: texto.slice(0, 1024) };\n    if (campo === 'video') cuerpo.supports_streaming = true;\n    if (teclado) cuerpo.reply_markup = teclado;\n    return { json: { metodo: campo === 'video' ? 'sendVideo' : 'sendPhoto', cuerpo } };\n  }\n  const cuerpo = { chat_id: $env.TELEGRAM_CHAT_ID, text: texto.slice(0, 4000), disable_web_page_preview: true };\n  if (teclado) cuerpo.reply_markup = teclado;\n  return { json: { metodo: 'sendMessage', cuerpo } };\n});\n"
       },
       "id": "dda17152-1a78-5aec-82b9-aebd07df9869",
       "name": "A Telegram",
@@ -93,6 +93,40 @@
       "typeVersion": 4.2,
       "position": [
         1100,
+        -90
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const enviados = $('A Telegram').all();\nreturn $input.all().flatMap((it, i) => {\n  const orig = enviados[i]?.json;\n  if (!orig || orig.metodo === 'sendMessage' || it.json.ok === true) return [];\n  const c = orig.cuerpo;\n  const enlace = c.video || c.photo || '';\n  const texto = String(c.caption || '') + (enlace && !String(c.caption || '').includes(enlace) ? '\\n' + enlace : '');\n  const cuerpo = { chat_id: c.chat_id, text: texto.slice(0, 4000), disable_web_page_preview: true };\n  if (c.reply_markup) cuerpo.reply_markup = c.reply_markup;\n  return [{ json: { metodo: 'sendMessage', cuerpo } }];\n});\n"
+      },
+      "id": "18fe5610-2f4a-54b2-a311-a08b59792bda",
+      "name": "Respaldo de texto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -90
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + ($json.metodo || 'sendMessage') }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}"
+      },
+      "id": "bfbe7eab-342c-5945-8336-d3b9ac051771",
+      "name": "Telegram (texto)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
         -90
       ],
       "onError": "continueRegularOutput"
@@ -176,6 +210,28 @@
         [
           {
             "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram": {
+      "main": [
+        [
+          {
+            "node": "Respaldo de texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respaldo de texto": {
+      "main": [
+        [
+          {
+            "node": "Telegram (texto)",
             "type": "main",
             "index": 0
           }
