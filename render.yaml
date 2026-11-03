@@ -101,6 +101,11 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # Montaje de vídeo en GitHub Actions (gratis): token con permiso «Actions: lectura y escritura» sobre este repositorio
+      - key: GITHUB_TOKEN_MONTAJE
+        sync: false
+      - key: MONTAJE_TOKEN
+        generateValue: true
       - key: CLOUDFLARE_ACCOUNT_ID
         sync: false
       - key: CLOUDFLARE_API_TOKEN

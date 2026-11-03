@@ -1686,11 +1686,38 @@ if (!escenas) escenas = jsonDeTexto($input.first().json.respuesta).escenas;
 if (!Array.isArray(escenas) || !escenas.length) throw new Error('No hay escenas para montar el vídeo');
 const trabajo = { escenas, formato: p.formato, pieza_id: p.pieza_id, prompt: p.prompt || p.titulo,
   cierre: $env.CIERRE_VIDEO || 'Síguenos para más ideas' };
-// En base64 para pasarlo a la línea de órdenes sin problemas de comillas
-return [{ json: { trabajo: Buffer.from(JSON.stringify(trabajo), 'utf8').toString('base64') } }];
+// Dónde se monta: en GitHub Actions (gratis, sin límite de memoria) si hay token; si no, en este servidor.
+const donde = String($env.MONTAJE_EN || ($env.GITHUB_TOKEN_MONTAJE ? 'github' : 'local')).toLowerCase();
+// En base64 para pasarlo a la línea de órdenes o a GitHub sin problemas de comillas
+return [{ json: { donde, trabajo: Buffer.from(JSON.stringify(trabajo), 'utf8').toString('base64') } }];
 """, (1210, 300)),
+        si_campo("¿En GitHub?", "donde", "github", (1430, 300)),
+        nodo("Encargar a GitHub", "n8n-nodes-base.httpRequest", 4.2, {
+            "method": "POST",
+            "url": "={{ 'https://api.github.com/repos/' + ($env.MONTAJE_REPO || 'JMGR79/omniagent-os') + '/actions/workflows/montar-video.yml/dispatches' }}",
+            "sendHeaders": True, "specifyHeaders": "json",
+            "jsonHeaders": "={{ JSON.stringify({ Authorization: 'Bearer ' + $env.GITHUB_TOKEN_MONTAJE, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'omniagent' }) }}",
+            "sendBody": True, "specifyBody": "json",
+            "jsonBody": "={{ JSON.stringify({ ref: $env.MONTAJE_RAMA || 'main', inputs: { trabajo: $json.trabajo, respuesta: $execution.resumeUrl } }) }}",
+            "options": {"timeout": 30000}}, (1650, 200)),
+        # GitHub devuelve el vídeo llamando a la URL de reanudación de esta ejecución
+        nodo("Esperar montaje", "n8n-nodes-base.wait", 1.1, {
+            "resume": "webhook", "httpMethod": "POST", "limitWaitTime": True, "limitType": "afterTimeInterval",
+            "resumeAmount": 20, "resumeUnit": "minutes", "options": {}}, (1870, 200),
+            webhookId="6f1d1c1e-0a00-4c00-9a00-000000001200"),
+        code("Vídeo de GitHub", r"""
+const r = $input.first().json;
+const b = r.body || {};
+if (!$env.MONTAJE_TOKEN || b.token !== $env.MONTAJE_TOKEN) throw new Error('Respuesta de montaje no autorizada (o se agotaron los 20 minutos de espera)');
+if (b.error || !b.video) throw new Error('El montaje en GitHub falló: ' + String(b.error || 'sin vídeo').slice(0, 300));
+const p = $('Preparar').first().json;
+return [{ json: { params: [b.video, 'video/mp4', String(p.prompt || p.titulo || '').slice(0, 2000), p.pieza_id] } }];
+""", (2090, 200)),
+        pg("Guardar vídeo montado", """
+INSERT INTO medios (tipo, mime, datos, prompt, pieza_id) VALUES ('video', $2, decode($1, 'base64'), $3, nullif($4, '')::uuid) RETURNING id
+""", "={{ $json.params }}", (2310, 200)),
         nodo("Montar vídeo", "n8n-nodes-base.executeCommand", 1,
-             {"command": "={{ \"node /opt/omni/montar.mjs '\" + $json.trabajo + \"'\" }}"}, (1430, 300)),
+             {"command": "={{ \"node /opt/omni/montar.mjs '\" + $json.trabajo + \"'\" }}"}, (1650, 400)),
         code("Vídeo montado", r"""
 const r0 = $input.first().json;
 let r;
@@ -1775,7 +1802,10 @@ return avisoTelegram('🎬 Vídeo listo' + (d.titulo ? ': ' + d.titulo : '') + '
     c = enlazar(("Generar vídeo", "Preparar"), ("Preparar", "¿Montaje?"), ("¿Montaje?", "¿Faltan escenas?", 0), ("¿Montaje?", "¿Sora?", 1),
                 ("¿Faltan escenas?", "Encargo de escenas", 0), ("¿Faltan escenas?", "Trabajo de montaje", 1),
                 ("Encargo de escenas", "Guionista de escenas"), ("Guionista de escenas", "Trabajo de montaje"),
-                ("Trabajo de montaje", "Montar vídeo"), ("Montar vídeo", "Vídeo montado"), ("Vídeo montado", "Dirección pública"),
+                ("Trabajo de montaje", "¿En GitHub?"), ("¿En GitHub?", "Encargar a GitHub", 0), ("¿En GitHub?", "Montar vídeo", 1),
+                ("Encargar a GitHub", "Esperar montaje"), ("Esperar montaje", "Vídeo de GitHub"), ("Vídeo de GitHub", "Guardar vídeo montado"),
+                ("Guardar vídeo montado", "Dirección pública"),
+                ("Montar vídeo", "Vídeo montado"), ("Vídeo montado", "Dirección pública"),
                 ("¿Sora?", "Lanzar Sora", 0), ("¿Sora?", "Lanzar", 1),
                 ("Lanzar Sora", "Operación"), ("Lanzar", "Operación"), ("Operación", "Esperar 20 s"),
                 ("Esperar 20 s", "Consultar"), ("Consultar", "¿Listo?"), ("¿Listo?", "¿Terminado?"),
