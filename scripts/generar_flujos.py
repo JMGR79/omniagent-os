@@ -218,7 +218,7 @@ const tope = parseFloat($env.PRESUPUESTO_TOKENS_DIARIO_EUR || '5');
 if (parseFloat(p.gastado_hoy) >= tope) throw new Error('Presupuesto diario de IA agotado (' + tope + ' EUR). Se reanuda mañana.');
 // Proveedor: anthropic (Claude), openai (ChatGPT) o gemini (Google). Se elige con PROVEEDOR_IA.
 const prov = String($env.PROVEEDOR_IA || 'anthropic').toLowerCase();
-const porDefecto = { anthropic: p.modelo || 'claude-sonnet-5-5', openai: 'gpt-5-mini', gemini: 'gemini-2.5-flash' };
+const porDefecto = { anthropic: p.modelo || 'claude-sonnet-5-5', openai: 'gpt-5-mini', gemini: 'gemini-3.5-flash' };
 if (!porDefecto[prov]) throw new Error('PROVEEDOR_IA no válido: ' + prov + ' (usa anthropic, openai o gemini)');
 const modelo = $env.MODELO_IA || porDefecto[prov];
 const sistema = p.sistema + '\nFecha y hora actuales (Madrid): ' + new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' }) + '.';
@@ -239,6 +239,8 @@ if (prov === 'anthropic') {
   cabeceras = { 'x-goog-api-key': $env.GEMINI_API_KEY };
   cuerpo = { systemInstruction: { parts: [{ text: sistema }] }, contents: [{ role: 'user', parts: [{ text: n.input }] }],
     generationConfig: { maxOutputTokens: n.max_tokens } };
+  // Los modelos Gemini 3+ «piensan» antes de responder y ese razonamiento gasta el límite de tokens: lo dejamos al mínimo.
+  if (/^gemini-([3-9]|\d\d)/.test(modelo)) cuerpo.generationConfig.thinkingConfig = { thinkingLevel: $env.GEMINI_RAZONAMIENTO || 'minimal' };
 }
 return [{ json: { proveedor: prov, modelo, version: p.version, url, cabeceras, cuerpo } }];
 """, (660, 100)),
@@ -772,8 +774,10 @@ def sys00():
         code("Extraer", r"""
 const e = $input.first().json;
 const msg = String(e.execution?.error?.message || e.trigger?.error?.message || 'Error desconocido');
-// Errores que no se arreglan reintentando: credenciales, permisos, presupuesto, datos.
-const noReintentable = /(No autorizado|credential|credencial|permission|permiso|Presupuesto|401|403|invalid|no válido)/i.test(msg);
+// Errores que no se arreglan reintentando: credenciales, permisos, presupuesto, cuota del proveedor, datos.
+// Tampoco se reintenta una ejecución que ya era un reintento (evita la cascada de incidentes).
+const esReintento = !!(e.execution?.retryOf);
+const noReintentable = esReintento || /(No autorizado|credential|credencial|permission|permiso|Presupuesto|401|403|429|quota|cuota|rate.?limit|too many requests|exceeded|invalid|no válido)/i.test(msg);
 return [{ json: { params: [e.workflow?.name || 'desconocido', String(e.workflow?.id || ''), String(e.execution?.id || ''),
   e.execution?.lastNodeExecuted || '', msg.slice(0, 2000), noReintentable ? 'no' : 'si'],
   aviso: '🛠 Error en ' + (e.workflow?.name || 'un flujo') + ' · nodo «' + (e.execution?.lastNodeExecuted || '?') + '»\n' + msg.slice(0, 800) +
