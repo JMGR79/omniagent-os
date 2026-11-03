@@ -355,11 +355,32 @@ const reglas = {
   tiktok: 'TikTok: guion de vídeo vertical de 30-45 s con [TEXTO EN PANTALLA] y [VOZ] por escenas.',
   youtube: 'YouTube Shorts: guion de 30-50 s con [TEXTO EN PANTALLA] y [VOZ], más un título de máximo 70 caracteres en el campo tema.',
 };
+// Línea editorial: cómo ayudamos a pymes, autónomos y pequeños negocios. El sector protagonista rota cada ciclo.
+const servicios = $env.SERVICIOS_NEGOCIO || [
+  'página web profesional con un agente de WhatsApp que atiende a los clientes 24/7, resuelve dudas, pide los datos y agenda citas o visitas',
+  'agenda y organización del trabajo automáticas (citas, visitas, recordatorios, reparto de tareas)',
+  'presupuestos, facturas, cobros y seguimiento de clientes sin papeleo',
+  'gestión de redes sociales con publicaciones y vídeos sobre el propio negocio',
+  'captación de clientes: más contactos, reseñas en Google y seguimiento de cada interesado hasta que compra',
+].join('; ');
+const sectores = String($env.SECTORES_OBJETIVO || 'empresa de reformas,fontanería y electricidad,restaurante o bar,peluquería o centro de estética,clínica dental o de fisioterapia,taller mecánico,tienda local,inmobiliaria,gestoría o asesoría,academia o centro de formación,gimnasio,carpintería o cerrajería')
+  .split(',').map((x) => x.trim()).filter(Boolean);
+const sector = sectores[Math.floor(Date.now() / (8 * 3600e3)) % sectores.length];
 const input = [
-  'Negocio: EstrategIA Digital 3.0 — consultoría y formación en inteligencia artificial, automatización y marketing digital para pymes y profesionales.',
+  'Negocio: EstrategIA Digital 3.0 — ayudamos a pymes, autónomos y pequeños negocios a ganar tiempo y conseguir más clientes con inteligencia artificial y automatización. ' +
+    'Lo que hacemos: ' + servicios + '.',
+  'Línea editorial OBLIGATORIA: cada pieza muestra, de forma práctica y con un ejemplo concreto del día a día, cómo ayudamos a un negocio a ganar tiempo, ordenar la administración, ' +
+    'llenar la agenda, estar en redes o traer clientes. Habla al dueño del negocio, con su lenguaje y sus problemas reales (llamadas perdidas, presupuestos sin responder, papeleo, ' +
+    'no tener tiempo para redes). Nada de teoría ni noticias generales de IA.',
+  'Sector protagonista de este ciclo: ' + sector + '. Al menos la mitad de las piezas deben centrarse en este sector con situaciones típicas suyas ' +
+    '(por ejemplo, para una empresa de reformas: el cliente escribe por WhatsApp a las 22:00, el agente le pide fotos y metros, agenda la visita y el presupuesto sale al día siguiente). ' +
+    'El resto puede tratar otros negocios pequeños.',
+  'Los ejemplos son ilustrativos: preséntalos como «imagina…» o «así funcionaría en…», nunca como clientes reales.',
   'Canales activos: ' + canales.join(', ') + '.',
   'Reglas por canal:\n' + canales.map((k) => '- ' + (reglas[k] || k)).join('\n'),
-  nuevas ? 'Crea ' + nuevas + ' piezas NUEVAS repartidas entre los canales activos (varía los temas: casos prácticos, errores comunes, herramientas, tutoriales breves, novedades de IA para negocio, llamadas a reservar una consultoría).' : 'No crees piezas nuevas: la cola está llena.',
+  nuevas ? 'Crea ' + nuevas + ' piezas NUEVAS repartidas entre los canales activos. Varía el enfoque: un día de trabajo antes y después de automatizar, ' +
+    'el error que le cuesta clientes a ese negocio, cómo funciona paso a paso el agente de WhatsApp o la agenda automática, preguntas frecuentes del dueño, ' +
+    'y llamadas a pedir una demostración gratuita.' : 'No crees piezas nuevas: la cola está llena.',
   ordenes.length ? 'Órdenes del dueño que debes cumplir (prioridad máxima):\n' + ordenes.map((o) => '- [' + o.id + '] ' + o.texto).join('\n') : '',
   rehacer.length ? 'Piezas que el dueño pidió cambiar (devuélvelas con el mismo id):\n' + rehacer.map((r) => '- id ' + r.id + ' (' + r.canal + '). Cambio pedido: ' + (r.cambio || 'mejorar') + '\nTexto actual: ' + r.texto).join('\n') : '',
   'Temas recientes que NO debes repetir: ' + JSON.stringify(c.temas_recientes || []),
