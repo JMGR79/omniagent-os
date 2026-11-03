@@ -64,15 +64,29 @@ async function imagenCloudflare(prompt, destino) {
   }
 }
 
+// Un solo hilo: el servidor tiene poca memoria y n8n ya ocupa la mayor parte.
 function ff(args) {
-  execFileSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: ['ignore', 'ignore', 'inherit'] });
+  execFileSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1', ...args],
+    { stdio: ['ignore', 'ignore', 'inherit'] });
+}
+
+// Memoria libre del contenedor (cgroup v2). Si no hay margen, mejor fallar el vídeo que tumbar n8n.
+function memoriaLibreMB() {
+  try {
+    const max = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
+    const usada = parseInt(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8'), 10);
+    if (max === 'max' || !usada) return null;
+    let cache = 0;
+    try { cache = parseInt((fs.readFileSync('/sys/fs/cgroup/memory.stat', 'utf8').match(/^inactive_file (\d+)/m) || [])[1] || '0', 10); } catch (e) { /* sin estadística */ }
+    return Math.round((parseInt(max, 10) - usada + cache) / 1048576);
+  } catch (e) { return null; }
 }
 
 const fuente = FUENTE.replace(/\\/g, '/').replace(/:/g, '\\:');
 const tamTexto = vertical ? 54 : 50;
 const anchoLinea = vertical ? 20 : 32;
 const fundidos = `fade=t=in:st=0:d=0.35,fade=t=out:st=${(SEG - 0.35).toFixed(2)}:d=0.35`;
-const comunX264 = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-an'];
+const comunX264 = ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'stillimage', '-crf', '25', '-threads', '1', '-pix_fmt', 'yuv420p', '-r', String(FPS), '-an'];
 
 function texto(archivoTexto, y) {
   const t = archivoTexto.replace(/\\/g, '/').replace(/:/g, '\\:');
@@ -81,6 +95,12 @@ function texto(archivoTexto, y) {
 }
 
 async function main() {
+  const libre = memoriaLibreMB();
+  const minimo = parseInt(env.MONTAJE_MEMORIA_MIN_MB || '110', 10);
+  if (libre !== null && libre < minimo) {
+    throw new Error(`Memoria insuficiente en el servidor para montar el vídeo (${libre} MB libres, hacen falta ${minimo}). ` +
+      'Reintenta más tarde o sube el plan de Render a uno con más memoria.');
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'montaje-'));
   try {
     const clips = [];
@@ -93,13 +113,17 @@ async function main() {
       const frames = Math.round(SEG * FPS);
       if (await imagenCloudflare(e.imagen, img)) {
         // Fondo desenfocado a pantalla completa + imagen con zoom lento + texto en el tercio inferior.
+        // Se lee la imagen una sola vez (sin -loop): el fondo se repite con «loop» y zoompan genera los fotogramas.
+        // Así el pico de memoria baja de ~700 MB a ~85 MB.
         const lado = vertical ? W : H;
         const filtro =
-          `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=20:2,eq=brightness=-0.15[fondo];` +
-          `[0:v]scale=${lado * 2}:${lado * 2},zoompan=z='min(zoom+0.0007,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${lado}x${lado}:fps=${FPS}[frente];` +
+          `[0:v]scale=${lado}:${lado},split[a][b];` +
+          `[a]scale=${W / 2}:${H / 2}:force_original_aspect_ratio=increase,crop=${W / 2}:${H / 2},boxblur=10:1,scale=${W}:${H},eq=brightness=-0.15,` +
+          `loop=loop=${frames - 1}:size=1:start=0,setpts=N/${FPS}/TB[fondo];` +
+          `[b]zoompan=z='min(zoom+0.0007,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${lado}x${lado}:fps=${FPS}[frente];` +
           `[fondo][frente]overlay=(W-w)/2:${vertical ? '(H-h)/2-140' : '0'}:shortest=1,` +
           `${texto(txt, vertical ? 'h*0.70' : 'h*0.72')},${fundidos},format=yuv420p[v]`;
-        ff(['-loop', '1', '-t', String(SEG), '-i', img, '-filter_complex', filtro, '-map', '[v]', '-t', String(SEG), ...comunX264, clip]);
+        ff(['-i', img, '-filter_complex', filtro, '-map', '[v]', '-frames:v', String(frames), ...comunX264, clip]);
       } else {
         const filtro = `${texto(txt, '(h-text_h)/2')},${fundidos},format=yuv420p`;
         ff(['-f', 'lavfi', '-i', `color=c=${AZUL}:s=${W}x${H}:d=${SEG}:r=${FPS}`, '-vf', filtro, '-t', String(SEG), ...comunX264, clip]);
