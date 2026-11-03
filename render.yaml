@@ -80,7 +80,7 @@ services:
         value: anthropic
       - key: NOMBRE_NEGOCIO
         value: EstrategIA Digital 3.0
-      # Fábrica de contenido: imágenes (openai o gemini) y vídeo (gemini = Veo, openai = Sora)
+      # Fábrica de contenido: imágenes (cloudflare = FLUX con cuota gratuita, openai o gemini) y vídeo (gemini = Veo, openai = Sora)
       - key: PROVEEDOR_IMAGEN
         sync: false
       - key: PROVEEDOR_VIDEO
@@ -95,6 +95,10 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
         sync: false
       - key: GMAIL_APP_PASSWORD
         sync: false

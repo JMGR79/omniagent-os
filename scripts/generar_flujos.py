@@ -1524,7 +1524,7 @@ def gen01():
         nodo("Generar imagen", "n8n-nodes-base.executeWorkflowTrigger", 1.1, {"inputSource": "passthrough"}, (0, 0)),
         code("Preparar", r"""
 const prov = String($env.PROVEEDOR_IMAGEN || '').toLowerCase();
-if (!prov) throw new Error('Configura PROVEEDOR_IMAGEN (openai o gemini) para generar imágenes');
+if (!prov) throw new Error('Configura PROVEEDOR_IMAGEN (cloudflare, openai o gemini) para generar imágenes');
 return $input.all().map((it) => {
   const j = it.json;
   const tipo = ['post', 'portada', 'miniatura'].includes(j.tipo) ? j.tipo : 'post';
@@ -1551,7 +1551,13 @@ return $input.all().map((it) => {
     url = ($env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com') + '/v1beta/models/' + ($env.MODELO_IMAGEN || 'imagen-4.0-generate-001') + ':predict';
     cab = { 'x-goog-api-key': $env.GEMINI_API_KEY };
     cuerpo = { instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: { cuadrado: '1:1', vertical: '9:16', horizontal: '16:9' }[formato] } };
-  } else throw new Error('PROVEEDOR_IMAGEN no válido: ' + prov + ' (usa openai o gemini)');
+  } else if (prov === 'cloudflare') {
+    // Cloudflare Workers AI (FLUX): incluye una cuota diaria gratuita. La imagen sale cuadrada.
+    if (!$env.CLOUDFLARE_ACCOUNT_ID || !$env.CLOUDFLARE_API_TOKEN) throw new Error('Faltan CLOUDFLARE_ACCOUNT_ID o CLOUDFLARE_API_TOKEN');
+    url = 'https://api.cloudflare.com/client/v4/accounts/' + encodeURIComponent($env.CLOUDFLARE_ACCOUNT_ID) + '/ai/run/' + ($env.MODELO_IMAGEN || '@cf/black-forest-labs/flux-1-schnell');
+    cab = { Authorization: 'Bearer ' + $env.CLOUDFLARE_API_TOKEN };
+    cuerpo = { prompt: prompt.slice(0, 2000), steps: 8 };
+  } else throw new Error('PROVEEDOR_IMAGEN no válido: ' + prov + ' (usa cloudflare, openai o gemini)');
   return { json: { url, cab, cuerpo, prompt, pieza_id: j.pieza_id || '' } };
 });
 """, (220, 0)),
@@ -1559,7 +1565,7 @@ return $input.all().map((it) => {
         code("Extraer imagen", r"""
 return $input.all().map((it, i) => {
   const r = it.json, p = $('Preparar').all()[i].json;
-  const b64 = r.data?.[0]?.b64_json || r.predictions?.[0]?.bytesBase64Encoded;
+  const b64 = r.data?.[0]?.b64_json || r.predictions?.[0]?.bytesBase64Encoded || r.result?.image;
   if (!b64) throw new Error('El proveedor no devolvió imagen: ' + JSON.stringify(r).slice(0, 300));
   const mime = b64.startsWith('/9j/') ? 'image/jpeg' : b64.startsWith('iVBOR') ? 'image/png' : 'image/webp';
   return { json: { params: [b64, mime, p.prompt.slice(0, 2000), p.pieza_id] } };
