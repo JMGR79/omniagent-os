@@ -1,6 +1,6 @@
 {
   "id": "omniGEN02video00",
-  "name": "GEN-02 Generar vídeo (Veo u OpenAI)",
+  "name": "GEN-02 Generar vídeo (montaje, Veo u OpenAI)",
   "nodes": [
     {
       "parameters": {
@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const j = $input.first().json;\nconst prov = String($env.PROVEEDOR_VIDEO || '').toLowerCase();\nconst horizontal = j.formato === 'horizontal';\nconst comun = { prov, prompt: String(j.prompt || ''), pieza_id: j.pieza_id || '', avisar: !!j.avisar, titulo: j.titulo || '' };\nif (prov === 'gemini') {\n  if (!$env.GEMINI_API_KEY) throw new Error('Falta GEMINI_API_KEY');\n  const base = ($env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com') + '/v1beta/';\n  return [{ json: Object.assign(comun, { base, url: base + 'models/' + ($env.MODELO_VIDEO || 'veo-3.1-generate-preview') + ':predictLongRunning',\n    cab: { 'x-goog-api-key': $env.GEMINI_API_KEY },\n    cuerpo: { instances: [{ prompt: comun.prompt.slice(0, 4000) }], parameters: { aspectRatio: horizontal ? '16:9' : '9:16' } } }) }];\n}\nif (prov === 'openai') {\n  // Sora (API de vídeos de OpenAI). OpenAI anunció su retirada; si ya no está disponible, usa PROVEEDOR_VIDEO=gemini.\n  if (!$env.OPENAI_API_KEY) throw new Error('Falta OPENAI_API_KEY');\n  const base = ($env.OPENAI_BASE_URL || 'https://api.openai.com') + '/v1/videos';\n  return [{ json: Object.assign(comun, { base, url: base, cab: { Authorization: 'Bearer ' + $env.OPENAI_API_KEY },\n    modelo: $env.MODELO_VIDEO || 'sora-2', tamano: horizontal ? '1280x720' : '720x1280', segundos: String($env.SEGUNDOS_VIDEO || '8') }) }];\n}\nthrow new Error('Configura PROVEEDOR_VIDEO: gemini (Veo) u openai (Sora) para generar vídeos');\n"
+        "jsCode": "const j = $input.first().json;\nconst prov = String($env.PROVEEDOR_VIDEO || '').toLowerCase();\nconst horizontal = j.formato === 'horizontal';\nconst comun = { prov, prompt: String(j.prompt || ''), pieza_id: j.pieza_id || '', avisar: !!j.avisar, titulo: j.titulo || '' };\nif (prov === 'gemini') {\n  if (!$env.GEMINI_API_KEY) throw new Error('Falta GEMINI_API_KEY');\n  const base = ($env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com') + '/v1beta/';\n  return [{ json: Object.assign(comun, { base, url: base + 'models/' + ($env.MODELO_VIDEO || 'veo-3.1-generate-preview') + ':predictLongRunning',\n    cab: { 'x-goog-api-key': $env.GEMINI_API_KEY },\n    cuerpo: { instances: [{ prompt: comun.prompt.slice(0, 4000) }], parameters: { aspectRatio: horizontal ? '16:9' : '9:16' } } }) }];\n}\nif (prov === 'openai') {\n  // Sora (API de vídeos de OpenAI). OpenAI anunció su retirada; si ya no está disponible, usa PROVEEDOR_VIDEO=gemini.\n  if (!$env.OPENAI_API_KEY) throw new Error('Falta OPENAI_API_KEY');\n  const base = ($env.OPENAI_BASE_URL || 'https://api.openai.com') + '/v1/videos';\n  return [{ json: Object.assign(comun, { base, url: base, cab: { Authorization: 'Bearer ' + $env.OPENAI_API_KEY },\n    modelo: $env.MODELO_VIDEO || 'sora-2', tamano: horizontal ? '1280x720' : '720x1280', segundos: String($env.SEGUNDOS_VIDEO || '8') }) }];\n}\nif (prov === 'montaje') {\n  // Montaje gratuito: imágenes de Cloudflare + textos en pantalla, montado con ffmpeg en el propio servidor.\n  const escenas = Array.isArray(j.escenas) && j.escenas.length ? j.escenas : null;\n  return [{ json: Object.assign(comun, { formato: horizontal ? 'horizontal' : 'vertical', escenas, faltan: !escenas }) }];\n}\nthrow new Error('Configura PROVEEDOR_VIDEO: montaje (gratis), gemini (Veo) u openai (Sora) para generar vídeos');\n"
       },
       "id": "284ad5b0-8bd6-5118-8878-a8a4ab16ca7f",
       "name": "Preparar",
@@ -26,6 +26,147 @@
       "position": [
         220,
         0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0bd1d9b5-0e89-54bd-b32e-c4fd82f9cd63",
+              "leftValue": "={{ $json.prov }}",
+              "rightValue": "montaje",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1e47d38e-3d29-5377-94fc-9d7c1fb072e4",
+      "name": "¿Montaje?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        330,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d7ab8c3a-b6f2-5a94-94d2-8886ff427066",
+              "leftValue": "={{ $json.faltan }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d76fd14f-9b14-5dec-9582-c1865b6b9f42",
+      "name": "¿Faltan escenas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        550,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Preparar').first().json;\nreturn [{ json: { agente_id: 5, max_tokens: 1500, origen: 'GEN-02', input:\n  'Convierte esto en un vídeo corto montado con imágenes (reel, short o TikTok) de 4 a 6 escenas. ' +\n  'Responde SOLO JSON: {\"escenas\":[{\"texto\":\"frase en pantalla en español de España, como mucho 9 palabras\",' +\n  '\"imagen\":\"descripción en inglés de una imagen SIN texto: sujeto, escena, luz y estilo (foto o ilustración moderna)\"}]}. ' +\n  'La primera escena es un gancho que engancha en 2 segundos; la última, una llamada a la acción. Nada de marcas registradas ni personas reales.\\n\\n' + 'Petición o guion:\\n' + String(p.prompt || p.titulo || '').slice(0, 3000) } }];\n"
+      },
+      "id": "2add3733-54d0-5b95-b9b9-f2f55c1f6116",
+      "name": "Encargo de escenas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        770,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "omniAGT00agentes",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "1925dd70-bc15-5f6f-b51b-c779d02fa22a",
+      "name": "Guionista de escenas",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        990,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nconst p = $('Preparar').first().json;\nlet escenas = p.escenas;\nif (!escenas) escenas = jsonDeTexto($input.first().json.respuesta).escenas;\nif (!Array.isArray(escenas) || !escenas.length) throw new Error('No hay escenas para montar el vídeo');\nconst trabajo = { escenas, formato: p.formato, pieza_id: p.pieza_id, prompt: p.prompt || p.titulo,\n  cierre: $env.CIERRE_VIDEO || 'Síguenos para más ideas' };\n// En base64 para pasarlo a la línea de órdenes sin problemas de comillas\nreturn [{ json: { trabajo: Buffer.from(JSON.stringify(trabajo), 'utf8').toString('base64') } }];\n"
+      },
+      "id": "9a715cf2-3781-5582-9ef1-f8deb4887c89",
+      "name": "Trabajo de montaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1210,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "={{ \"node /opt/omni/montar.mjs '\" + $json.trabajo + \"'\" }}"
+      },
+      "id": "c45b33de-2a7b-507a-b607-faf41f92186a",
+      "name": "Montar vídeo",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1430,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r0 = $input.first().json;\nlet r;\ntry { r = JSON.parse(String(r0.stdout || '').trim().split('\\n').pop()); }\ncatch (e) { throw new Error('El montaje no devolvió resultado: ' + String(r0.stderr || r0.stdout || '').slice(0, 300)); }\nif (!r.id) throw new Error('El montaje no guardó el vídeo');\nreturn [{ json: { id: r.id } }];\n"
+      },
+      "id": "ac959e79-e0e3-565a-ab7d-84cb4d90c81c",
+      "name": "Vídeo montado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1650,
+        300
       ]
     },
     {
@@ -57,7 +198,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        330,
+        440,
         0
       ]
     },
@@ -424,7 +565,98 @@
       "main": [
         [
           {
+            "node": "¿Montaje?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Montaje?": {
+      "main": [
+        [
+          {
+            "node": "¿Faltan escenas?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "¿Sora?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Faltan escenas?": {
+      "main": [
+        [
+          {
+            "node": "Encargo de escenas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trabajo de montaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encargo de escenas": {
+      "main": [
+        [
+          {
+            "node": "Guionista de escenas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guionista de escenas": {
+      "main": [
+        [
+          {
+            "node": "Trabajo de montaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trabajo de montaje": {
+      "main": [
+        [
+          {
+            "node": "Montar vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar vídeo": {
+      "main": [
+        [
+          {
+            "node": "Vídeo montado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vídeo montado": {
+      "main": [
+        [
+          {
+            "node": "Dirección pública",
             "type": "main",
             "index": 0
           }

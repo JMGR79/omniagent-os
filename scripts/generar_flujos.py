@@ -1612,9 +1612,45 @@ if (prov === 'openai') {
   return [{ json: Object.assign(comun, { base, url: base, cab: { Authorization: 'Bearer ' + $env.OPENAI_API_KEY },
     modelo: $env.MODELO_VIDEO || 'sora-2', tamano: horizontal ? '1280x720' : '720x1280', segundos: String($env.SEGUNDOS_VIDEO || '8') }) }];
 }
-throw new Error('Configura PROVEEDOR_VIDEO: gemini (Veo) u openai (Sora) para generar vídeos');
+if (prov === 'montaje') {
+  // Montaje gratuito: imágenes de Cloudflare + textos en pantalla, montado con ffmpeg en el propio servidor.
+  const escenas = Array.isArray(j.escenas) && j.escenas.length ? j.escenas : null;
+  return [{ json: Object.assign(comun, { formato: horizontal ? 'horizontal' : 'vertical', escenas, faltan: !escenas }) }];
+}
+throw new Error('Configura PROVEEDOR_VIDEO: montaje (gratis), gemini (Veo) u openai (Sora) para generar vídeos');
 """, (220, 0)),
-        si_campo("¿Sora?", "prov", "openai", (330, 0)),
+        si_campo("¿Montaje?", "prov", "montaje", (330, 300)),
+        si_campo("¿Faltan escenas?", "faltan", True, (550, 300), operador="true", tipo="boolean"),
+        code("Encargo de escenas", r"""
+const p = $('Preparar').first().json;
+return [{ json: { agente_id: 5, max_tokens: 1500, origen: 'GEN-02', input:
+  'Convierte esto en un vídeo corto montado con imágenes (reel, short o TikTok) de 4 a 6 escenas. ' +
+  'Responde SOLO JSON: {"escenas":[{"texto":"frase en pantalla en español de España, como mucho 9 palabras",' +
+  '"imagen":"descripción en inglés de una imagen SIN texto: sujeto, escena, luz y estilo (foto o ilustración moderna)"}]}. ' +
+  'La primera escena es un gancho que engancha en 2 segundos; la última, una llamada a la acción. Nada de marcas registradas ni personas reales.\n\n' + 'Petición o guion:\n' + String(p.prompt || p.titulo || '').slice(0, 3000) } }];
+""", (770, 250)),
+        llamar_agente("Guionista de escenas", (990, 250)),
+        code("Trabajo de montaje", JSON_DE_TEXTO + r"""
+const p = $('Preparar').first().json;
+let escenas = p.escenas;
+if (!escenas) escenas = jsonDeTexto($input.first().json.respuesta).escenas;
+if (!Array.isArray(escenas) || !escenas.length) throw new Error('No hay escenas para montar el vídeo');
+const trabajo = { escenas, formato: p.formato, pieza_id: p.pieza_id, prompt: p.prompt || p.titulo,
+  cierre: $env.CIERRE_VIDEO || 'Síguenos para más ideas' };
+// En base64 para pasarlo a la línea de órdenes sin problemas de comillas
+return [{ json: { trabajo: Buffer.from(JSON.stringify(trabajo), 'utf8').toString('base64') } }];
+""", (1210, 300)),
+        nodo("Montar vídeo", "n8n-nodes-base.executeCommand", 1,
+             {"command": "={{ \"node /opt/omni/montar.mjs '\" + $json.trabajo + \"'\" }}"}, (1430, 300)),
+        code("Vídeo montado", r"""
+const r0 = $input.first().json;
+let r;
+try { r = JSON.parse(String(r0.stdout || '').trim().split('\n').pop()); }
+catch (e) { throw new Error('El montaje no devolvió resultado: ' + String(r0.stderr || r0.stdout || '').slice(0, 300)); }
+if (!r.id) throw new Error('El montaje no guardó el vídeo');
+return [{ json: { id: r.id } }];
+""", (1650, 300)),
+        si_campo("¿Sora?", "prov", "openai", (440, 0)),
         http_json("Lanzar", (440, 100)),
         nodo("Lanzar Sora", "n8n-nodes-base.httpRequest", 4.2, {
             "method": "POST", "url": "={{ $json.url }}", "sendHeaders": True, "specifyHeaders": "json",
@@ -1687,7 +1723,11 @@ return avisoTelegram('🎬 Vídeo listo' + (d.titulo ? ': ' + d.titulo : '') + '
 """, (2860, -250)),
         code("Resultado", "return $('Dirección pública').all().map((it) => ({ json: it.json }));", (2860, -100)),
     ]
-    c = enlazar(("Generar vídeo", "Preparar"), ("Preparar", "¿Sora?"), ("¿Sora?", "Lanzar Sora", 0), ("¿Sora?", "Lanzar", 1),
+    c = enlazar(("Generar vídeo", "Preparar"), ("Preparar", "¿Montaje?"), ("¿Montaje?", "¿Faltan escenas?", 0), ("¿Montaje?", "¿Sora?", 1),
+                ("¿Faltan escenas?", "Encargo de escenas", 0), ("¿Faltan escenas?", "Trabajo de montaje", 1),
+                ("Encargo de escenas", "Guionista de escenas"), ("Guionista de escenas", "Trabajo de montaje"),
+                ("Trabajo de montaje", "Montar vídeo"), ("Montar vídeo", "Vídeo montado"), ("Vídeo montado", "Dirección pública"),
+                ("¿Sora?", "Lanzar Sora", 0), ("¿Sora?", "Lanzar", 1),
                 ("Lanzar Sora", "Operación"), ("Lanzar", "Operación"), ("Operación", "Esperar 20 s"),
                 ("Esperar 20 s", "Consultar"), ("Consultar", "¿Listo?"), ("¿Listo?", "¿Terminado?"),
                 ("¿Terminado?", "Descargar", 0), ("¿Terminado?", "Esperar 20 s", 1),
@@ -1695,7 +1735,7 @@ return avisoTelegram('🎬 Vídeo listo' + (d.titulo ? ': ' + d.titulo : '') + '
                 ("Dirección pública", "Asignar a la pieza"),
                 ("Asignar a la pieza", "Avisar si toca"), ("Asignar a la pieza", "Resultado"))
     con_avisos(n, c, "Avisar si toca", 3080, -250)
-    return flujo("GEN02", "GEN-02 Generar vídeo (Veo u OpenAI)", n, c)
+    return flujo("GEN02", "GEN-02 Generar vídeo (montaje, Veo u OpenAI)", n, c)
 
 
 # ── GEN-03 · Crear una web (landing con formulario de captación) ─────
@@ -1818,7 +1858,7 @@ def vid01():
         nodo("Cada 10 min", "n8n-nodes-base.scheduleTrigger", 1.2,
              {"rule": {"interval": [{"field": "minutes", "minutesInterval": 10}]}}, (0, 0)),
         code("¿Activada?", r"""
-if (!['gemini', 'openai'].includes(String($env.PROVEEDOR_VIDEO || '').toLowerCase())) return [];
+if (!['montaje', 'gemini', 'openai'].includes(String($env.PROVEEDOR_VIDEO || '').toLowerCase())) return [];
 return [{ json: { max: parseInt($env.VIDEOS_POR_DIA || '1', 10) } }];
 """, (220, 0)),
         pg("Elegir guion", """
@@ -1833,6 +1873,11 @@ RETURNING id, canal, formato, tema, brief
 const p = $input.first().json;
 // Sin guion pendiente, Postgres devuelve {success: true}: no se genera nada (Veo cuesta dinero).
 if (!p.id) return [];
+if (String($env.PROVEEDOR_VIDEO || '').toLowerCase() === 'montaje') return [{ json: { agente_id: 5, max_tokens: 1500, origen: 'VID-01', input:
+  'Convierte esto en un vídeo corto montado con imágenes (reel, short o TikTok) de 4 a 6 escenas. ' +
+  'Responde SOLO JSON: {"escenas":[{"texto":"frase en pantalla en español de España, como mucho 9 palabras",' +
+  '"imagen":"descripción en inglés de una imagen SIN texto: sujeto, escena, luz y estilo (foto o ilustración moderna)"}]}. ' +
+  'La primera escena es un gancho que engancha en 2 segundos; la última, una llamada a la acción. Nada de marcas registradas ni personas reales.\n\n' + 'Tema: ' + (p.tema || '') + '\nGuion:\n' + String(p.brief || '').slice(0, 3000) } }];
 return [{ json: { agente_id: 5, max_tokens: 900, origen: 'VID-01', input:
   'Convierte este guion en UN prompt para un generador de vídeo con IA (Veo o Sora): un vídeo vertical de 8 segundos con audio. ' +
   'Escribe el prompt en inglés, describiendo el plano, el sujeto, el movimiento de cámara, la luz y el estilo (moderno, profesional, colores azul y blanco). ' +
@@ -1840,9 +1885,15 @@ return [{ json: { agente_id: 5, max_tokens: 900, origen: 'VID-01', input:
   'Responde SOLO con el prompt.\n\nTema: ' + (p.tema || '') + '\nGuion:\n' + String(p.brief || '').slice(0, 3000) } }];
 """, (660, 0)),
         llamar_agente("Agente de vídeo", (880, 0)),
-        code("Pedido a Veo", r"""
+        code("Pedido de vídeo", JSON_DE_TEXTO + r"""
 const p = $('Elegir guion').first().json;
-return [{ json: { prompt: String($input.first().json.respuesta || '').trim(), formato: 'vertical', pieza_id: p.id, avisar: false, titulo: p.tema } }];
+const respuesta = String($input.first().json.respuesta || '').trim();
+if (String($env.PROVEEDOR_VIDEO || '').toLowerCase() === 'montaje') {
+  let escenas = null;
+  try { escenas = jsonDeTexto(respuesta).escenas; } catch (e) { /* GEN-02 las pedirá de nuevo */ }
+  return [{ json: { prompt: String(p.brief || p.tema || ''), escenas, formato: 'vertical', pieza_id: p.id, avisar: false, titulo: p.tema } }];
+}
+return [{ json: { prompt: respuesta, formato: 'vertical', pieza_id: p.id, avisar: false, titulo: p.tema } }];
 """, (1100, 0)),
         sub("Generar vídeo", "GEN02", (1320, 0)),
         code("Siguiente estado", r"""
@@ -1868,7 +1919,7 @@ return avisoTelegram(txt).map((x) => ({ json: Object.assign(x.json, { media_url:
 """, (1980, 0)),
     ]
     c = enlazar(("Cada 10 min", "¿Activada?"), ("¿Activada?", "Elegir guion"), ("Elegir guion", "Encargo de prompt"),
-                ("Encargo de prompt", "Agente de vídeo"), ("Agente de vídeo", "Pedido a Veo"), ("Pedido a Veo", "Generar vídeo"),
+                ("Encargo de prompt", "Agente de vídeo"), ("Agente de vídeo", "Pedido de vídeo"), ("Pedido de vídeo", "Generar vídeo"),
                 ("Generar vídeo", "Siguiente estado"), ("Siguiente estado", "Actualizar pieza"), ("Actualizar pieza", "Aviso"))
     con_avisos(n, c, "Aviso", 2200, 0)
     con_ejecutar_ahora(n, c, "¿Activada?")
