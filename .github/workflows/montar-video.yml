@@ -31,8 +31,10 @@ jobs:
         env:
           RESPUESTA: ${{ inputs.respuesta }}
         run: |
-          # Solo se entrega a una URL de reanudación de n8n (…/webhook-waiting/<ejecución>)
-          echo "$RESPUESTA" | grep -Eq '^https://[A-Za-z0-9.-]+/webhook-waiting/[0-9]+$' || { echo "URL de entrega no válida"; exit 1; }
+          # La URL lleva la firma de n8n: se oculta en el registro público
+          echo "::add-mask::$RESPUESTA"
+          # Solo se entrega a una URL de reanudación de n8n (…/webhook-waiting/<ejecución>[?signature=…])
+          echo "$RESPUESTA" | grep -Eq '^https://[A-Za-z0-9.-]+/webhook-waiting/[0-9]+(\?signature=[A-Za-z0-9._~%-]+)?$' || { echo "URL de entrega no válida"; exit 1; }
 
       - name: Instalar ffmpeg y la fuente
         run: |
@@ -66,6 +68,6 @@ jobs:
           RESPUESTA: ${{ inputs.respuesta }}
           MONTAJE_TOKEN: ${{ secrets.MONTAJE_TOKEN }}
         run: |
-          echo "$RESPUESTA" | grep -Eq '^https://[A-Za-z0-9.-]+/webhook-waiting/[0-9]+$' || exit 0
+          echo "$RESPUESTA" | grep -Eq '^https://[A-Za-z0-9.-]+/webhook-waiting/[0-9]+(\?signature=[A-Za-z0-9._~%-]+)?$' || exit 0
           node -e "console.log(JSON.stringify({token:process.env.MONTAJE_TOKEN,error:'El montaje falló en GitHub Actions; revisa el registro del flujo «Montar vídeo».'}))" \
             | curl -sS --max-time 60 -X POST -H 'content-type: application/json' --data-binary @- "$RESPUESTA" > /dev/null || true
