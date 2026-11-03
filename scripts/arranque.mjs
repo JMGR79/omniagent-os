@@ -132,7 +132,7 @@ async function main() {
     omniWA02enviarms: true,
     omniGEN01imagen0: true, omniGEN02video00: true, omniWEB01servir0: true,
     omniGEN03webs000: tieneIA, omniNEG01negocio: tieneIA,
-    omniVID01fabrica: tieneIA && ['gemini', 'openai'].includes((env.PROVEEDOR_VIDEO || '').toLowerCase()),
+    omniVID01fabrica: tieneIA && ['montaje', 'gemini', 'openai'].includes((env.PROVEEDOR_VIDEO || '').toLowerCase()),
     omniWA01entrante: tieneIA && !!(env.WHATSAPP_TOKEN && env.WHATSAPP_PHONE_ID && env.WHATSAPP_APP_SECRET && env.WHATSAPP_VERIFY_TOKEN),
   };
   if (env.OMNI_AUTOACTIVAR !== 'false') {

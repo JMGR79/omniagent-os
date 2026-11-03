@@ -61,6 +61,9 @@ services:
         value: --max-old-space-size=384
       - key: NODE_FUNCTION_ALLOW_BUILTIN
         value: crypto
+      # Permite el nodo «Execute Command» (n8n 2 lo desactiva por defecto): lo usa el montaje de vídeo
+      - key: NODES_EXCLUDE
+        value: "[]"
       # ── OmniAgent ────────────────────────────────────────────────
       - key: OMNIAGENT_CONTROL_TOKEN
         generateValue: true
@@ -80,7 +83,8 @@ services:
         value: anthropic
       - key: NOMBRE_NEGOCIO
         value: EstrategIA Digital 3.0
-      # Fábrica de contenido: imágenes (cloudflare = FLUX con cuota gratuita, openai o gemini) y vídeo (gemini = Veo, openai = Sora)
+      # Fábrica de contenido: imágenes (cloudflare = FLUX con cuota gratuita, openai o gemini) y vídeo
+      # (montaje = gratis con imágenes de Cloudflare y ffmpeg, gemini = Veo, openai = Sora)
       - key: PROVEEDOR_IMAGEN
         sync: false
       - key: PROVEEDOR_VIDEO

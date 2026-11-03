@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "jsCode": "if (!['gemini', 'openai'].includes(String($env.PROVEEDOR_VIDEO || '').toLowerCase())) return [];\nreturn [{ json: { max: parseInt($env.VIDEOS_POR_DIA || '1', 10) } }];\n"
+        "jsCode": "if (!['montaje', 'gemini', 'openai'].includes(String($env.PROVEEDOR_VIDEO || '').toLowerCase())) return [];\nreturn [{ json: { max: parseInt($env.VIDEOS_POR_DIA || '1', 10) } }];\n"
       },
       "id": "50f7c799-ba14-52ec-8b90-5480ab62cea0",
       "name": "¿Activada?",
@@ -60,7 +60,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const p = $input.first().json;\n// Sin guion pendiente, Postgres devuelve {success: true}: no se genera nada (Veo cuesta dinero).\nif (!p.id) return [];\nreturn [{ json: { agente_id: 5, max_tokens: 900, origen: 'VID-01', input:\n  'Convierte este guion en UN prompt para un generador de vídeo con IA (Veo o Sora): un vídeo vertical de 8 segundos con audio. ' +\n  'Escribe el prompt en inglés, describiendo el plano, el sujeto, el movimiento de cámara, la luz y el estilo (moderno, profesional, colores azul y blanco). ' +\n  'Incluye la locución en español de España entre comillas como lo que dice el narrador (como mucho 20 palabras). Nada de marcas registradas ni personas reales. ' +\n  'Responde SOLO con el prompt.\\n\\nTema: ' + (p.tema || '') + '\\nGuion:\\n' + String(p.brief || '').slice(0, 3000) } }];\n"
+        "jsCode": "const p = $input.first().json;\n// Sin guion pendiente, Postgres devuelve {success: true}: no se genera nada (Veo cuesta dinero).\nif (!p.id) return [];\nif (String($env.PROVEEDOR_VIDEO || '').toLowerCase() === 'montaje') return [{ json: { agente_id: 5, max_tokens: 1500, origen: 'VID-01', input:\n  'Convierte esto en un vídeo corto montado con imágenes (reel, short o TikTok) de 4 a 6 escenas. ' +\n  'Responde SOLO JSON: {\"escenas\":[{\"texto\":\"frase en pantalla en español de España, como mucho 9 palabras\",' +\n  '\"imagen\":\"descripción en inglés de una imagen SIN texto: sujeto, escena, luz y estilo (foto o ilustración moderna)\"}]}. ' +\n  'La primera escena es un gancho que engancha en 2 segundos; la última, una llamada a la acción. Nada de marcas registradas ni personas reales.\\n\\n' + 'Tema: ' + (p.tema || '') + '\\nGuion:\\n' + String(p.brief || '').slice(0, 3000) } }];\nreturn [{ json: { agente_id: 5, max_tokens: 900, origen: 'VID-01', input:\n  'Convierte este guion en UN prompt para un generador de vídeo con IA (Veo o Sora): un vídeo vertical de 8 segundos con audio. ' +\n  'Escribe el prompt en inglés, describiendo el plano, el sujeto, el movimiento de cámara, la luz y el estilo (moderno, profesional, colores azul y blanco). ' +\n  'Incluye la locución en español de España entre comillas como lo que dice el narrador (como mucho 20 palabras). Nada de marcas registradas ni personas reales. ' +\n  'Responde SOLO con el prompt.\\n\\nTema: ' + (p.tema || '') + '\\nGuion:\\n' + String(p.brief || '').slice(0, 3000) } }];\n"
       },
       "id": "ac76e33e-691e-5534-904a-5ec4258a31c3",
       "name": "Encargo de prompt",
@@ -95,10 +95,10 @@
     },
     {
       "parameters": {
-        "jsCode": "const p = $('Elegir guion').first().json;\nreturn [{ json: { prompt: String($input.first().json.respuesta || '').trim(), formato: 'vertical', pieza_id: p.id, avisar: false, titulo: p.tema } }];\n"
+        "jsCode": "function jsonDeTexto(t) {\n  const s = String(t || '').replace(/```(?:json)?/gi, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  if (a < 0 || b <= a) throw new Error('El agente no devolvió JSON: ' + s.slice(0, 200));\n  return JSON.parse(s.slice(a, b + 1));\n}\n\nconst p = $('Elegir guion').first().json;\nconst respuesta = String($input.first().json.respuesta || '').trim();\nif (String($env.PROVEEDOR_VIDEO || '').toLowerCase() === 'montaje') {\n  let escenas = null;\n  try { escenas = jsonDeTexto(respuesta).escenas; } catch (e) { /* GEN-02 las pedirá de nuevo */ }\n  return [{ json: { prompt: String(p.brief || p.tema || ''), escenas, formato: 'vertical', pieza_id: p.id, avisar: false, titulo: p.tema } }];\n}\nreturn [{ json: { prompt: respuesta, formato: 'vertical', pieza_id: p.id, avisar: false, titulo: p.tema } }];\n"
       },
-      "id": "3dae7f74-80cd-5fb8-bb5d-03459c96ff20",
-      "name": "Pedido a Veo",
+      "id": "6862c03f-c617-504f-a6fc-68f2b354f89a",
+      "name": "Pedido de vídeo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -298,14 +298,14 @@
       "main": [
         [
           {
-            "node": "Pedido a Veo",
+            "node": "Pedido de vídeo",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Pedido a Veo": {
+    "Pedido de vídeo": {
       "main": [
         [
           {
