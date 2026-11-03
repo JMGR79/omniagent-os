@@ -1,13 +1,15 @@
 // OmniAgent OS · preparación en cada arranque del contenedor (antes de `n8n start`).
 // 1) Aplica las migraciones SQL (idempotentes).
 // 2) Crea o actualiza las credenciales de n8n a partir de variables de entorno.
-// 3) Importa los flujos que aún no existen (nunca pisa los que ya editaste en n8n).
+// 3) Importa los flujos que faltan y actualiza los que cambiaron en el repositorio
+//    (OMNI_ACTUALIZAR_FLUJOS=false para no tocar nunca los existentes).
 // 4) Activa una sola vez cada flujo cuyos requisitos estén configurados.
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 const BASE = process.env.OMNI_DIR || '/opt/omni';
@@ -78,21 +80,41 @@ async function main() {
     n8n('import:credentials', '--separate', '--input=' + dirCred);
     log('credenciales sincronizadas:', creds.map((x) => x.name).join(', '));
 
-    // 3) Flujos que faltan
+    // 3) Flujos que faltan o que cambiaron en el repositorio
     const dirWf = path.join(BASE, 'n8n', 'workflows');
     const archivos = fs.readdirSync(dirWf).filter((x) => x.endsWith('.json'));
     const existentes = new Set((await c.query(`SELECT id FROM "${esquemaN8n}".workflow_entity`)).rows.map((r) => r.id));
+    const huellas = new Map((await c.query(`SELECT clave, valor FROM omni_meta WHERE clave LIKE 'huella:%'`)).rows.map((r) => [r.clave, r.valor]));
+    const actualizar = env.OMNI_ACTUALIZAR_FLUJOS !== 'false';
     const dirNuevos = path.join(tmp, 'wf');
     fs.mkdirSync(dirNuevos);
-    let nuevos = 0;
+    const importar = [];
     for (const f of archivos) {
-      const wf = JSON.parse(fs.readFileSync(path.join(dirWf, f), 'utf8'));
-      if (existentes.has(wf.id)) continue;
+      const texto = fs.readFileSync(path.join(dirWf, f), 'utf8');
+      const wf = JSON.parse(texto);
+      const huella = crypto.createHash('sha256').update(texto).digest('hex');
+      const existe = existentes.has(wf.id);
+      if (existe && (!actualizar || huellas.get('huella:' + wf.id) === huella)) continue;
       fs.copyFileSync(path.join(dirWf, f), path.join(dirNuevos, f));
-      nuevos++;
+      importar.push({ id: wf.id, huella, existe });
     }
-    if (nuevos) { n8n('import:workflow', '--separate', '--input=' + dirNuevos); log('flujos importados:', nuevos); }
-    else log('todos los flujos ya existen; no se toca nada');
+    if (importar.length) {
+      n8n('import:workflow', '--separate', '--input=' + dirNuevos);
+      for (const w of importar) {
+        await c.query(`INSERT INTO omni_meta (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = excluded.valor`, ['huella:' + w.id, w.huella]);
+        // Un flujo actualizado que ya estaba activo se vuelve a publicar con la versión nueva
+        if (w.existe && (await c.query('SELECT 1 FROM omni_meta WHERE clave = $1', ['activado:' + w.id])).rowCount) {
+          try { n8n('publish:workflow', '--id=' + w.id); } catch (e) { log('no se pudo volver a publicar', w.id, '-', e.message); }
+        }
+      }
+      log('flujos importados o actualizados:', importar.map((w) => w.id).join(', '));
+    } else log('todos los flujos están al día; no se toca nada');
+
+    // Los reintentos pendientes por falta de cuota o límite de uso del proveedor de IA no se arreglan reintentando
+    const limpiados = await c.query(`UPDATE incidentes SET proximo_reintento = NULL
+      WHERE resuelto_en IS NULL AND proximo_reintento IS NOT NULL
+        AND error ~* '(429|quota|rate.?limit|too many requests|exceeded)'`);
+    if (limpiados.rowCount) log('reintentos cancelados por cuota agotada:', limpiados.rowCount);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
