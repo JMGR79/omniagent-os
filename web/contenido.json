@@ -1,8 +1,26 @@
 {
   "_nota": "Lista de vídeos de la sección Contenido. Añade objetos arriba del todo. Campos: titulo, plataforma (youtube | tiktok | instagram | x | linkedin), url, miniatura (URL de imagen, opcional), duracion, fecha, estado (p. ej. Nuevo o Próximamente; vacío si no quieres etiqueta).",
   "videos": [
-    { "titulo": "De encofrador a agencia de IA: mi historia", "plataforma": "youtube", "url": "", "duracion": "", "estado": "Próximamente" },
-    { "titulo": "Un agente de IA que responde tu WhatsApp 24/7", "plataforma": "tiktok", "url": "", "duracion": "", "estado": "Próximamente" },
-    { "titulo": "3 automatizaciones que ahorran 10 horas a la semana", "plataforma": "instagram", "url": "", "duracion": "", "estado": "Próximamente" }
+    {
+      "titulo": "Cómo empezar a usar la IA en tu negocio",
+      "plataforma": "youtube",
+      "url": "",
+      "duracion": "",
+      "estado": "Próximamente"
+    },
+    {
+      "titulo": "Crea un agente de IA que responde tu WhatsApp 24/7",
+      "plataforma": "tiktok",
+      "url": "",
+      "duracion": "",
+      "estado": "Próximamente"
+    },
+    {
+      "titulo": "3 automatizaciones que ahorran 10 horas a la semana",
+      "plataforma": "instagram",
+      "url": "",
+      "duracion": "",
+      "estado": "Próximamente"
+    }
   ]
 }

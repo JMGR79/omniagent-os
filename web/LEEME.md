@@ -10,6 +10,14 @@ Todo lo editable está en el bloque `CONFIG` al final de `index.html`:
 - `email`: correo de contacto.
 - `formEndpoint`: URL que recibe el formulario en JSON (`nombre`, `telefono`, `email`, `servicio`, `mensaje`, `origen`, `fecha`). Puede ser un webhook de n8n de OmniAgent (para que el lead entre en el sistema) o Formspree. Mientras esté vacío, el formulario no envía nada y pide escribir al email.
 
+## Casos reales y testimonios
+
+En `CONFIG.casos` y `CONFIG.testimonios`. Mientras estén vacías, la web muestra huecos marcados como «en preparación» o «pendiente». Añade solo casos y testimonios reales, con permiso del cliente; el formato de cada uno está comentado en el propio bloque.
+
+## Estilo
+
+Neón violeta (#A855F7) y cian (#22D3EE) sobre azul noche, tipografías Orbitron (marca) y Exo 2 (texto), y los robots de `assets/`. Es el mismo estilo que el banner de YouTube.
+
 ## Vídeos y contenido
 
 La sección «Contenido» lee `contenido.json`. Para publicar un vídeo nuevo, añade un objeto al principio de la lista `videos` con `titulo`, `plataforma`, `url` y, si quieres, `miniatura`, `duracion`, `fecha` y `estado`. Un flujo de n8n puede reescribir este archivo cada vez que se publique un vídeo, y la web se actualiza sola.
