@@ -1,4 +1,4 @@
-# OmniAgent OS · EstrategIA Digital 3.0
+# OmniAgent OS · Estrateg IA Digital 3.0
 
 Sistema de agentes de IA sobre n8n que gestiona en automático las redes sociales, el email, WhatsApp y los leads, y que crea imágenes, vídeos, webs, negocios y canales.
 

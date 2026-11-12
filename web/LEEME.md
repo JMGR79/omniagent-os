@@ -1,4 +1,4 @@
-# Web pública · EstrategIA Digital 3.0
+# Web pública · Estrateg IA Digital 3.0
 
 Landing de la agencia. Es un sitio estático (un solo `index.html`, sin compilación), pensado para crecer después hacia la web completa.
 
