@@ -160,3 +160,17 @@ services:
       - path: /*
         name: X-Robots-Tag
         value: noindex
+
+  # ── Web pública de la agencia (landing) · sitio estático gratuito ──
+  - type: web
+    name: estrategia-web
+    runtime: static
+    buildCommand: echo "sin compilación"
+    staticPublishPath: ./web
+    headers:
+      - path: /contenido.json
+        name: Cache-Control
+        value: no-cache
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
