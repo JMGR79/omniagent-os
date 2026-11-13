@@ -1,0 +1,145 @@
+# OmniAgent OS · mudanza de Render al servidor gratuito de Oracle Cloud (se lanza a mano, una vez).
+# 1) Copia las variables del servicio de Render al .env del servidor (con la base de datos y la URL nuevas).
+# 2) Copia la base de datos de Render (contenidos, leads, flujos, credenciales; sin el historial de ejecuciones).
+# 3) Arranca OmniAgent en Oracle en MODO PRUEBA: no publica solo ni le quita los bots a Render.
+# Secretos: RENDER_API_KEY, ORACLE_HOST, ORACLE_SSH_KEY y, opcional, ORACLE_USER y ORACLE_DOMINIO.
+name: Migrar desde Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      servicio:
+        description: ID del servicio n8n en Render
+        default: srv-dbkakstg1s2s739q78tg
+        required: true
+      postgres:
+        description: ID de la base de datos en Render
+        default: dpg-dbkakho473hc7384j6i0-a
+        required: true
+      sobrescribir_env:
+        description: Rehacer /opt/omniagent/.env aunque ya exista
+        type: boolean
+        default: false
+
+concurrency:
+  group: oracle
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+      ORACLE_USER: ${{ secrets.ORACLE_USER || 'ubuntu' }}
+      ORACLE_DOMINIO: ${{ secrets.ORACLE_DOMINIO }}
+      PG_ID: ${{ inputs.postgres }}
+      TIENE_CLAVE: ${{ secrets.ORACLE_SSH_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprobar los secretos
+        run: |
+          falta=""
+          [ -n "$RENDER_API_KEY" ] || falta="$falta RENDER_API_KEY"
+          [ -n "$ORACLE_HOST" ] || falta="$falta ORACLE_HOST"
+          [ "$TIENE_CLAVE" = "true" ] || falta="$falta ORACLE_SSH_KEY"
+          if [ -n "$falta" ]; then echo "Faltan secretos del repositorio:$falta"; exit 1; fi
+          echo "::add-mask::$ORACLE_HOST"
+          # Sin dominio propio se usa uno gratuito que apunta a la IP (1-2-3-4.sslip.io)
+          DOMINIO="${ORACLE_DOMINIO:-$(echo "$ORACLE_HOST" | tr . -).sslip.io}"
+          echo "::add-mask::$DOMINIO"
+          echo "DOMINIO=$DOMINIO" >> "$GITHUB_ENV"
+
+      - name: Preparar la conexión SSH
+        env:
+          CLAVE: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" | tr -d '\r' > ~/.ssh/oracle
+          chmod 600 ~/.ssh/oracle
+          ssh-keyscan -T 20 -H "$ORACLE_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host oracle\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/oracle\n  ServerAliveInterval 30\n' "$ORACLE_HOST" "$ORACLE_USER" > ~/.ssh/config
+
+      - name: Preparar el servidor y copiar el código
+        run: |
+          scp -q deploy/oracle/preparar-servidor.sh oracle:/tmp/preparar-servidor.sh
+          ssh oracle 'bash /tmp/preparar-servidor.sh'
+          rsync -az --delete --exclude .git --exclude omniagent-os.zip ./ oracle:/opt/omniagent/src/
+
+      - name: Variables de Render → .env del servidor
+        run: |
+          if ssh oracle 'test -f /opt/omniagent/.env' && [ "${{ inputs.sobrescribir_env }}" != "true" ]; then
+            echo "El servidor ya tiene /opt/omniagent/.env: se conserva (marca «sobrescribir» para rehacerlo)."
+          else
+            umask 077
+            node scripts/migrar/env-desde-render.mjs "${{ inputs.servicio }}" "$DOMINIO" "$RUNNER_TEMP/omni.env"
+            scp -q "$RUNNER_TEMP/omni.env" oracle:/opt/omniagent/.env
+            ssh oracle 'chmod 600 /opt/omniagent/.env'
+            rm -f "$RUNNER_TEMP/omni.env"
+          fi
+
+      - name: Abrir la base de Render solo a este equipo
+        run: |
+          IP="$(curl -fsS https://api.ipify.org)"
+          echo "::add-mask::$IP"
+          curl -fsS -X PATCH "https://api.render.com/v1/postgres/$PG_ID" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+            -d "{\"ipAllowList\":[{\"cidrBlock\":\"$IP/32\",\"description\":\"migracion-oracle\"}]}" >/dev/null
+          echo "Acceso temporal concedido"
+
+      - name: Copia de la base de datos de Render
+        run: |
+          URL="$(curl -fsS "https://api.render.com/v1/postgres/$PG_ID/connection-info" \
+            -H "Authorization: Bearer $RENDER_API_KEY" | jq -r '.externalConnectionString')"
+          echo "::add-mask::$URL"
+          [ -n "$URL" ] && [ "$URL" != "null" ] || { echo "Render no dio la conexión externa"; exit 1; }
+          for i in $(seq 1 12); do
+            if docker run --rm postgres:17-alpine pg_isready -d "$URL" >/dev/null 2>&1; then break; fi
+            echo "Esperando a que Render aplique el acceso ($i/12)…"; sleep 10
+          done
+          docker run --rm -v "$RUNNER_TEMP:/salida" postgres:17-alpine \
+            pg_dump -d "$URL" -Fc --no-owner --no-acl \
+              --exclude-table-data='n8n.execution_*' \
+              -f /salida/omniagent.dump
+          ls -lh "$RUNNER_TEMP/omniagent.dump" | awk '{print "Copia hecha:", $5}'
+
+      - name: Cerrar de nuevo la base de Render
+        if: always()
+        run: |
+          curl -fsS -X PATCH "https://api.render.com/v1/postgres/$PG_ID" \
+            -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+            -d '{"ipAllowList":[]}' >/dev/null && echo "Acceso externo cerrado"
+
+      - name: Restaurar en Oracle y arrancar
+        run: |
+          scp -q "$RUNNER_TEMP/omniagent.dump" oracle:/opt/omniagent/omniagent.dump
+          rm -f "$RUNNER_TEMP/omniagent.dump"
+          ssh oracle 'bash -s' <<'REMOTO'
+          set -euo pipefail
+          cd /opt/omniagent/src/deploy/oracle
+          DC="sudo docker compose --env-file /opt/omniagent/.env"
+          $DC build n8n
+          $DC stop n8n 2>/dev/null || true
+          $DC up -d --wait postgres
+          # Base limpia y restauración de la copia
+          $DC exec -T postgres psql -q -U omniagent -d postgres -c "DROP DATABASE IF EXISTS omniagent WITH (FORCE)" -c "CREATE DATABASE omniagent OWNER omniagent"
+          $DC exec -T postgres pg_restore -U omniagent -d omniagent --no-owner --no-acl < /opt/omniagent/omniagent.dump \
+            || echo "Aviso: pg_restore informó de errores menores (revisa arriba); se continúa"
+          rm -f /opt/omniagent/omniagent.dump
+          $DC up -d --remove-orphans
+          echo "Esperando a que n8n responda…"
+          for i in $(seq 1 60); do
+            if $DC exec -T n8n wget -qO- http://localhost:5678/healthz >/dev/null 2>&1; then
+              echo "OmniAgent en marcha en Oracle (MODO PRUEBA)"; $DC ps; exit 0
+            fi
+            sleep 5
+          done
+          echo "n8n no responde: últimos registros"
+          $DC logs --tail 80 n8n
+          exit 1
+          REMOTO

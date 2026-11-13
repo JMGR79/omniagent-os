@@ -8,6 +8,11 @@ if [ -n "$RENDER_EXTERNAL_URL" ]; then
   export N8N_HOST="${N8N_HOST:-$RENDER_EXTERNAL_HOSTNAME}"
   export N8N_PROTOCOL="${N8N_PROTOCOL:-https}"
 fi
+# Modo prueba (servidor nuevo mientras el antiguo sigue encendido): nada se publica solo
+if [ "$OMNI_MODO_PRUEBA" = "true" ]; then
+  export MODO_AUTOMATICO=false
+  echo "[omniagent] MODO PRUEBA: publicaciones automáticas y bots entrantes en pausa"
+fi
 eval "$(node /opt/omni/db-env.mjs)"
 node /opt/omni/arranque.mjs
 exec n8n start
