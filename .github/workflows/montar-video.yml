@@ -15,7 +15,7 @@ on:
         required: true
 
 permissions:
-  contents: read
+  contents: write   # para publicar el vídeo como archivo de la release «videos»
 
 jobs:
   montar:
@@ -51,16 +51,28 @@ jobs:
           OMNI_MONTAJE_SALIDA: ${{ runner.temp }}/video.mp4
         run: node scripts/montar.mjs "$TRABAJO"
 
-      - name: Entregar el vídeo a OmniAgent
+      - name: Publicar el vídeo en la release «videos»
+        id: publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VIDEO: ${{ runner.temp }}/video.mp4
+        run: |
+          # El vídeo se guarda en GitHub (público, como cualquier vídeo para redes) y a OmniAgent solo le llega el enlace.
+          gh release view videos > /dev/null 2>&1 || gh release create videos --title "Vídeos de OmniAgent" --notes "Vídeos montados automáticamente por OmniAgent."
+          NOMBRE="video-${{ github.run_id }}-${{ github.run_attempt }}.mp4"
+          cp "$VIDEO" "${{ runner.temp }}/$NOMBRE"
+          gh release upload videos "${{ runner.temp }}/$NOMBRE" --clobber
+          echo "url=https://github.com/${{ github.repository }}/releases/download/videos/$NOMBRE" >> "$GITHUB_OUTPUT"
+
+      - name: Entregar el enlace a OmniAgent
         env:
           RESPUESTA: ${{ inputs.respuesta }}
           MONTAJE_TOKEN: ${{ secrets.MONTAJE_TOKEN }}
-          VIDEO: ${{ runner.temp }}/video.mp4
-          CARGA: ${{ runner.temp }}/entrega.json
+          URL_VIDEO: ${{ steps.publicar.outputs.url }}
         run: |
-          node -e "const fs=require('fs');fs.writeFileSync(process.env.CARGA,JSON.stringify({token:process.env.MONTAJE_TOKEN,video:fs.readFileSync(process.env.VIDEO).toString('base64')}))"
-          curl -sS --fail --max-time 120 -X POST -H 'content-type: application/json' --data-binary "@$CARGA" "$RESPUESTA" > /dev/null
-          echo "Vídeo entregado ($(stat -c %s "$VIDEO") bytes)"
+          node -e "console.log(JSON.stringify({token:process.env.MONTAJE_TOKEN,url:process.env.URL_VIDEO}))" \
+            | curl -sS --fail --max-time 60 -X POST -H 'content-type: application/json' --data-binary @- "$RESPUESTA" > /dev/null
+          echo "Vídeo entregado: $URL_VIDEO"
 
       - name: Avisar a OmniAgent del fallo
         if: failure()

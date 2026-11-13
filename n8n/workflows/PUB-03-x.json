@@ -44,7 +44,8 @@
               "rightValue": "",
               "operator": {
                 "type": "string",
-                "operation": "notEmpty"
+                "operation": "notEmpty",
+                "singleValue": true
               }
             }
           ],
