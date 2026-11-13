@@ -22,7 +22,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT encode(datos, 'base64') AS b64, mime FROM medios WHERE id::text = $1 LIMIT 1",
+        "query": "SELECT CASE WHEN url IS NULL THEN encode(datos, 'base64') END AS b64, mime, url FROM medios WHERE id::text = $1 LIMIT 1",
         "options": {
           "queryReplacement": "={{ [String($json.query.id || '').replace(/[^0-9a-f-]/gi, '').slice(0, 36)] }}"
         }
@@ -45,7 +45,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nif (!r.b64) return [{ json: { encontrado: false } }];\nconst ext = r.mime.split('/')[1].replace('jpeg', 'jpg');\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(r.b64, 'base64'), 'omniagent.' + ext, r.mime);\nreturn [{ json: { encontrado: true }, binary: { data: bin } }];\n"
+        "jsCode": "const r = $input.first().json;\nif (r.url) return [{ json: { encontrado: false, redirigir: r.url } }];\nif (!r.b64) return [{ json: { encontrado: false, redirigir: '' } }];\nconst ext = r.mime.split('/')[1].replace('jpeg', 'jpg');\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(r.b64, 'base64'), 'omniagent.' + ext, r.mime);\nreturn [{ json: { encontrado: true }, binary: { data: bin } }];\n"
       },
       "id": "03db93c2-4aa3-5288-a9a8-b922afb74f46",
       "name": "A binario",
@@ -115,6 +115,54 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dbd25cf3-b28e-59a8-a487-9bd28d4b1112",
+              "leftValue": "={{ $json.redirigir }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c7490d39-7367-56cd-81b4-28ff1ea4d2ee",
+      "name": "¿Fuera?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        770,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "={{ $json.redirigir }}"
+      },
+      "id": "665db9e8-7d4b-5aea-840d-93218d2dcbca",
+      "name": "Redirigir",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        990,
+        120
+      ]
+    },
+    {
+      "parameters": {
         "respondWith": "text",
         "responseBody": "No encontrado",
         "options": {
@@ -126,8 +174,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        880,
-        80
+        990,
+        220
       ]
     },
     {
@@ -418,6 +466,24 @@
         [
           {
             "node": "Enviar archivo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Fuera?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Fuera?": {
+      "main": [
+        [
+          {
+            "node": "Redirigir",
             "type": "main",
             "index": 0
           }

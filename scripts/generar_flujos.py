@@ -1310,7 +1310,7 @@ AYUDA_WA = (
 def si_campo(nombre, campo, valor, pos, operador="equals", tipo="string"):
     cond = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "si/" + nombre)), "leftValue": "={{ $json.%s }}" % campo,
             "rightValue": valor, "operator": {"type": tipo, "operation": operador}}
-    if tipo == "boolean":
+    if tipo == "boolean" or operador in ("notEmpty", "empty"):
         cond["operator"]["singleValue"] = True
     return nodo(nombre, "n8n-nodes-base.if", 2.2, {
         "conditions": {"options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict", "version": 2},
@@ -1705,17 +1705,19 @@ return [{ json: { donde, trabajo: Buffer.from(JSON.stringify(trabajo), 'utf8').t
         nodo("Esperar montaje", "n8n-nodes-base.wait", 1.1, {
             "resume": "webhook", "httpMethod": "POST", "limitWaitTime": True, "limitType": "afterTimeInterval",
             "resumeAmount": 20, "resumeUnit": "minutes", "options": {}}, (1870, 200),
-            webhookId="6f1d1c1e-0a00-4c00-9a00-000000001200"),
+            webhookId="6f1d1c1e-0a00-4c00-9a00-000000001300"),
         code("Vídeo de GitHub", r"""
 const r = $input.first().json;
 const b = r.body || {};
 if (!$env.MONTAJE_TOKEN || b.token !== $env.MONTAJE_TOKEN) throw new Error('Respuesta de montaje no autorizada (o se agotaron los 20 minutos de espera)');
-if (b.error || !b.video) throw new Error('El montaje en GitHub falló: ' + String(b.error || 'sin vídeo').slice(0, 300));
+// GitHub publica el vídeo y solo devuelve su URL pública: así el vídeo nunca pasa por la memoria de n8n.
+if (b.error || !b.url) throw new Error('El montaje en GitHub falló: ' + String(b.error || 'sin vídeo').slice(0, 300));
+if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/download\/[\w.-]+\/[\w.-]+\.mp4$/.test(b.url)) throw new Error('URL de vídeo no válida');
 const p = $('Preparar').first().json;
-return [{ json: { params: [b.video, 'video/mp4', String(p.prompt || p.titulo || '').slice(0, 2000), p.pieza_id] } }];
+return [{ json: { params: [b.url, 'video/mp4', String(p.prompt || p.titulo || '').slice(0, 2000), p.pieza_id] } }];
 """, (2090, 200)),
         pg("Guardar vídeo montado", """
-INSERT INTO medios (tipo, mime, datos, prompt, pieza_id) VALUES ('video', $2, decode($1, 'base64'), $3, nullif($4, '')::uuid) RETURNING id
+INSERT INTO medios (tipo, mime, url, prompt, pieza_id) VALUES ('video', $2, $1, $3, nullif($4, '')::uuid) RETURNING id, url
 """, "={{ $json.params }}", (2310, 200)),
         nodo("Montar vídeo", "n8n-nodes-base.executeCommand", 1,
              {"command": "={{ \"node /opt/omni/montar.mjs '\" + $json.trabajo + \"'\" }}"}, (1650, 400)),
@@ -1789,7 +1791,8 @@ INSERT INTO medios (tipo, mime, datos, prompt, pieza_id) VALUES ('video', $2, de
         code("Dirección pública", BASE_PUBLICA + r"""
 const p = $('Preparar').first().json;
 const id = $input.first().json.id;
-return [{ json: { medio_id: id, pieza_id: p.pieza_id, url: BASE + '/webhook/medio?id=' + id, media_tipo: 'video', avisar: p.avisar, titulo: p.titulo } }];
+const url = $input.first().json.url || BASE + '/webhook/medio?id=' + id;
+return [{ json: { medio_id: id, pieza_id: p.pieza_id, url, media_tipo: 'video', avisar: p.avisar, titulo: p.titulo } }];
 """, (2420, -100)),
         pg("Asignar a la pieza", "UPDATE piezas SET media_url = $1, actualizado_en = now() WHERE id = nullif($2, '')::uuid RETURNING id",
            "={{ [$json.url, $json.pieza_id] }}", (2640, -100), alwaysOutputData=True),
@@ -1875,11 +1878,12 @@ def web01():
     n = [
         nodo("Medio", "n8n-nodes-base.webhook", 2, {"httpMethod": "GET", "path": "medio", "responseMode": "responseNode", "options": {}},
              (0, 0), webhookId="6f1d1c1e-0a00-4c00-9a00-000000001200"),
-        pg("Leer medio", "SELECT encode(datos, 'base64') AS b64, mime FROM medios WHERE id::text = $1 LIMIT 1",
+        pg("Leer medio", "SELECT CASE WHEN url IS NULL THEN encode(datos, 'base64') END AS b64, mime, url FROM medios WHERE id::text = $1 LIMIT 1",
            "={{ [String($json.query.id || '').replace(/[^0-9a-f-]/gi, '').slice(0, 36)] }}", (220, 0), alwaysOutputData=True),
         code("A binario", r"""
 const r = $input.first().json;
-if (!r.b64) return [{ json: { encontrado: false } }];
+if (r.url) return [{ json: { encontrado: false, redirigir: r.url } }];
+if (!r.b64) return [{ json: { encontrado: false, redirigir: '' } }];
 const ext = r.mime.split('/')[1].replace('jpeg', 'jpg');
 const bin = await this.helpers.prepareBinaryData(Buffer.from(r.b64, 'base64'), 'omniagent.' + ext, r.mime);
 return [{ json: { encontrado: true }, binary: { data: bin } }];
@@ -1887,7 +1891,9 @@ return [{ json: { encontrado: true }, binary: { data: bin } }];
         si_campo("¿Existe?", "encontrado", True, (660, 0), operador="true", tipo="boolean"),
         responder("Enviar archivo", (880, -80), respondWith="binary",
                   options={"responseHeaders": {"entries": [{"name": "Cache-Control", "value": "public, max-age=31536000, immutable"}]}}),
-        responder("No existe", (880, 80), respondWith="text", responseBody="No encontrado", options={"responseCode": 404}),
+        si_campo("¿Fuera?", "redirigir", "", (770, 160), operador="notEmpty"),
+        responder("Redirigir", (990, 120), respondWith="redirect", redirectURL="={{ $json.redirigir }}"),
+        responder("No existe", (990, 220), respondWith="text", responseBody="No encontrado", options={"responseCode": 404}),
 
         nodo("Web", "n8n-nodes-base.webhook", 2, {"httpMethod": "GET", "path": "web", "responseMode": "responseNode", "options": {}},
              (0, 300), webhookId="6f1d1c1e-0a00-4c00-9a00-000000001300"),
@@ -1924,7 +1930,8 @@ return avisoTelegram('🧲 Nuevo lead desde la web «' + d.web + '»\n' + [d.nom
 """, (660, 680)),
     ]
     c = enlazar(("Medio", "Leer medio"), ("Leer medio", "A binario"), ("A binario", "¿Existe?"),
-                ("¿Existe?", "Enviar archivo", 0), ("¿Existe?", "No existe", 1),
+                ("¿Existe?", "Enviar archivo", 0), ("¿Existe?", "¿Fuera?", 1),
+                ("¿Fuera?", "Redirigir", 0), ("¿Fuera?", "No existe", 1),
                 ("Web", "Leer web"), ("Leer web", "Enviar web"),
                 ("Formulario", "Limpiar datos"), ("Limpiar datos", "Guardar lead"),
                 ("Guardar lead", "Gracias"), ("Guardar lead", "Avisar del lead"))

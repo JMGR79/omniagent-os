@@ -54,6 +54,20 @@ async function main() {
   await c.query(`CREATE TABLE IF NOT EXISTS omni_meta (clave text PRIMARY KEY, valor text, creado_en timestamptz DEFAULT now())`);
   if (esquemaN8n !== 'public') await c.query(`CREATE SCHEMA IF NOT EXISTS "${esquemaN8n}"`);
 
+  // 1b) Limpieza de ejecuciones de n8n atascadas: tras una caída, n8n intenta recuperarlas todas al
+  //     arrancar y, si son miles, se queda sin memoria y entra en bucle. Nunca bloquea el arranque.
+  const limpiezas = [
+    ['a medias', `DELETE FROM "${esquemaN8n}".execution_entity WHERE status IN ('new','running','unknown','crashed')
+        AND coalesce("startedAt", "createdAt") < now() - interval '30 minutes'`],
+    ['en espera caducadas', `DELETE FROM "${esquemaN8n}".execution_entity WHERE status = 'waiting'
+        AND (coalesce("waitTill", "createdAt") < now() - interval '1 hour')`],
+    ['antiguas', `DELETE FROM "${esquemaN8n}".execution_entity WHERE "createdAt" < now() - interval '${parseInt(env.OMNI_DIAS_EJECUCIONES || '3', 10)} days'`],
+  ];
+  for (const [nombre, sql] of limpiezas) {
+    try { const r = await c.query(sql); if (r.rowCount) log(`ejecuciones ${nombre} borradas:`, r.rowCount); }
+    catch (e) { log(`no se pudieron limpiar las ejecuciones ${nombre}:`, e.message); }
+  }
+
   // 2) Credenciales desde variables de entorno (se reimportan en cada arranque)
   const creds = [{
     id: 'omniPostgres0001', name: 'Postgres OmniAgent', type: 'postgres',

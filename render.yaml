@@ -56,7 +56,16 @@ services:
       - key: EXECUTIONS_DATA_PRUNE
         value: "true"
       - key: EXECUTIONS_DATA_MAX_AGE
-        value: "168"
+        value: "48"
+      # Menos memoria y base de datos: solo se guardan las ejecuciones con error
+      - key: EXECUTIONS_DATA_SAVE_ON_SUCCESS
+        value: none
+      - key: EXECUTIONS_DATA_SAVE_ON_PROGRESS
+        value: "false"
+      - key: EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS
+        value: "false"
+      - key: EXECUTIONS_DATA_PRUNE_MAX_COUNT
+        value: "2000"
       # Límite de memoria de n8n: deja margen para el montaje de vídeo (plan Starter, 512 MB)
       - key: NODE_OPTIONS
         value: --max-old-space-size=320

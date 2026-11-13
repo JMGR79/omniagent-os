@@ -217,11 +217,11 @@
         1870,
         200
       ],
-      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000001200"
+      "webhookId": "6f1d1c1e-0a00-4c00-9a00-000000001300"
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nconst b = r.body || {};\nif (!$env.MONTAJE_TOKEN || b.token !== $env.MONTAJE_TOKEN) throw new Error('Respuesta de montaje no autorizada (o se agotaron los 20 minutos de espera)');\nif (b.error || !b.video) throw new Error('El montaje en GitHub falló: ' + String(b.error || 'sin vídeo').slice(0, 300));\nconst p = $('Preparar').first().json;\nreturn [{ json: { params: [b.video, 'video/mp4', String(p.prompt || p.titulo || '').slice(0, 2000), p.pieza_id] } }];\n"
+        "jsCode": "const r = $input.first().json;\nconst b = r.body || {};\nif (!$env.MONTAJE_TOKEN || b.token !== $env.MONTAJE_TOKEN) throw new Error('Respuesta de montaje no autorizada (o se agotaron los 20 minutos de espera)');\n// GitHub publica el vídeo y solo devuelve su URL pública: así el vídeo nunca pasa por la memoria de n8n.\nif (b.error || !b.url) throw new Error('El montaje en GitHub falló: ' + String(b.error || 'sin vídeo').slice(0, 300));\nif (!/^https:\\/\\/github\\.com\\/[\\w.-]+\\/[\\w.-]+\\/releases\\/download\\/[\\w.-]+\\/[\\w.-]+\\.mp4$/.test(b.url)) throw new Error('URL de vídeo no válida');\nconst p = $('Preparar').first().json;\nreturn [{ json: { params: [b.url, 'video/mp4', String(p.prompt || p.titulo || '').slice(0, 2000), p.pieza_id] } }];\n"
       },
       "id": "f180f1b4-94e2-5b66-b303-ce789266d1a0",
       "name": "Vídeo de GitHub",
@@ -235,7 +235,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO medios (tipo, mime, datos, prompt, pieza_id) VALUES ('video', $2, decode($1, 'base64'), $3, nullif($4, '')::uuid) RETURNING id",
+        "query": "INSERT INTO medios (tipo, mime, url, prompt, pieza_id) VALUES ('video', $2, $1, $3, nullif($4, '')::uuid) RETURNING id, url",
         "options": {
           "queryReplacement": "={{ $json.params }}"
         }
@@ -542,7 +542,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const BASE = String($env.WEBHOOK_URL || $env.N8N_EDITOR_BASE_URL || 'http://localhost:5678/').replace(/\\/$/, '');\n\nconst p = $('Preparar').first().json;\nconst id = $input.first().json.id;\nreturn [{ json: { medio_id: id, pieza_id: p.pieza_id, url: BASE + '/webhook/medio?id=' + id, media_tipo: 'video', avisar: p.avisar, titulo: p.titulo } }];\n"
+        "jsCode": "const BASE = String($env.WEBHOOK_URL || $env.N8N_EDITOR_BASE_URL || 'http://localhost:5678/').replace(/\\/$/, '');\n\nconst p = $('Preparar').first().json;\nconst id = $input.first().json.id;\nconst url = $input.first().json.url || BASE + '/webhook/medio?id=' + id;\nreturn [{ json: { medio_id: id, pieza_id: p.pieza_id, url, media_tipo: 'video', avisar: p.avisar, titulo: p.titulo } }];\n"
       },
       "id": "242a3713-e9f3-5e87-80f3-87cf119500bd",
       "name": "Dirección pública",
