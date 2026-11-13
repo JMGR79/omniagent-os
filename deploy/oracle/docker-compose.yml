@@ -1,0 +1,53 @@
+# OmniAgent OS en un servidor gratuito de Oracle Cloud (Ampere A1, «Always Free»).
+# Lo despliega solo la tarea de GitHub «Desplegar en Oracle» cada vez que se fusiona en main.
+# Las claves viven únicamente en /opt/omniagent/.env, en el servidor (nunca en el repositorio).
+name: omniagent
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omniagent
+      POSTGRES_USER: omniagent
+      POSTGRES_PASSWORD: ${DB_POSTGRESDB_PASSWORD:?falta DB_POSTGRESDB_PASSWORD en /opt/omniagent/.env}
+    volumes:
+      - datos-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omniagent -d omniagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  n8n:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: omniagent-n8n:local
+    restart: unless-stopped
+    env_file: /opt/omniagent/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "5678"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMINIO: ${DOMINIO:?falta DOMINIO en /opt/omniagent/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - datos-caddy:/data
+      - config-caddy:/config
+    depends_on:
+      - n8n
+
+volumes:
+  datos-postgres:
+  datos-caddy:
+  config-caddy:

@@ -1,0 +1,5 @@
+# HTTPS automático (Let's Encrypt) delante de n8n.
+{$DOMINIO} {
+	encode gzip
+	reverse_proxy n8n:5678
+}

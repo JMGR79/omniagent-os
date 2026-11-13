@@ -1,0 +1,84 @@
+# OmniAgent OS · despliegue automático en el servidor gratuito de Oracle Cloud.
+# Cada fusión en main copia el código al servidor y reconstruye n8n con Docker Compose.
+# Secretos del repositorio: ORACLE_HOST (IP pública), ORACLE_SSH_KEY (clave privada SSH)
+# y, opcional, ORACLE_USER (por defecto «ubuntu»). Sin ORACLE_HOST, esta tarea no hace nada.
+name: Desplegar en Oracle
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "app/**"
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: oracle
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+      ORACLE_USER: ${{ secrets.ORACLE_USER || 'ubuntu' }}
+    steps:
+      - name: ¿Hay servidor de Oracle configurado?
+        id: hay
+        run: |
+          if [ -z "$ORACLE_HOST" ]; then
+            echo "Sin el secreto ORACLE_HOST: no se despliega en Oracle."
+            echo "si=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "si=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.hay.outputs.si == 'true'
+
+      - name: Preparar la conexión SSH
+        if: steps.hay.outputs.si == 'true'
+        env:
+          CLAVE: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          echo "::add-mask::$ORACLE_HOST"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" | tr -d '\r' > ~/.ssh/oracle
+          chmod 600 ~/.ssh/oracle
+          ssh-keyscan -T 20 -H "$ORACLE_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host oracle\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/oracle\n  ServerAliveInterval 30\n' "$ORACLE_HOST" "$ORACLE_USER" > ~/.ssh/config
+
+      - name: Preparar el servidor y copiar el código
+        if: steps.hay.outputs.si == 'true'
+        run: |
+          scp -q deploy/oracle/preparar-servidor.sh oracle:/tmp/preparar-servidor.sh
+          ssh oracle 'bash /tmp/preparar-servidor.sh'
+          rsync -az --delete --exclude .git --exclude omniagent-os.zip ./ oracle:/opt/omniagent/src/
+
+      - name: Reconstruir y arrancar
+        if: steps.hay.outputs.si == 'true'
+        run: |
+          ssh oracle 'bash -s' <<'REMOTO'
+          set -euo pipefail
+          if [ ! -f /opt/omniagent/.env ]; then
+            echo "Aún no hay /opt/omniagent/.env: ejecuta primero la tarea «Migrar desde Render»."
+            exit 0
+          fi
+          cd /opt/omniagent/src/deploy/oracle
+          sudo docker compose --env-file /opt/omniagent/.env up -d --build --remove-orphans
+          sudo docker image prune -f >/dev/null
+          echo "Esperando a que n8n responda…"
+          for i in $(seq 1 60); do
+            if sudo docker compose --env-file /opt/omniagent/.env exec -T n8n wget -qO- http://localhost:5678/healthz >/dev/null 2>&1; then
+              echo "n8n en marcha"; sudo docker compose --env-file /opt/omniagent/.env ps; exit 0
+            fi
+            sleep 5
+          done
+          echo "n8n no responde: últimos registros"
+          sudo docker compose --env-file /opt/omniagent/.env logs --tail 80 n8n
+          exit 1
+          REMOTO

@@ -158,6 +158,26 @@ async function main() {
       catch (e) { log('no se pudo activar', id, '-', e.message); }
     }
   }
+  // 5) Modo prueba: los flujos que reciben mensajes (Telegram, WhatsApp) se despublican para no
+  //    quitarle el webhook al servidor que sigue en producción; al salir del modo prueba se reactivan.
+  const entrantes = ['omniTEL01telegrm', 'omniWA01entrante'];
+  const prueba = env.OMNI_MODO_PRUEBA === 'true';
+  for (const id of entrantes) {
+    const marca = 'pausado_prueba:' + id;
+    const pausado = (await c.query('SELECT 1 FROM omni_meta WHERE clave = $1', [marca])).rowCount > 0;
+    const activo = (await c.query(`SELECT 1 FROM "${esquemaN8n}".workflow_entity WHERE id = $1 AND active`, [id])).rowCount > 0;
+    try {
+      if (prueba && activo) {
+        n8n('unpublish:workflow', '--id=' + id);
+        await c.query('INSERT INTO omni_meta (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO NOTHING', [marca, new Date().toISOString()]);
+        log('modo prueba, en pausa:', id);
+      } else if (!prueba && pausado) {
+        n8n('publish:workflow', '--id=' + id);
+        await c.query('DELETE FROM omni_meta WHERE clave = $1', [marca]);
+        log('fin del modo prueba, reactivado:', id);
+      }
+    } catch (e) { log('no se pudo cambiar el estado de', id, '-', e.message); }
+  }
   await c.end();
 }
 
