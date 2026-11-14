@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>La IA que trabaja por ti · Ebook</title>
+<meta name="description" content="Guía práctica para pymes y autónomos: 30 prompts listos para copiar, 6 automatizaciones sin código y un plan de 30 días para ahorrar 10 horas a la semana con IA.">
+<meta property="og:title" content="La IA que trabaja por ti · Ebook para pymes y autónomos">
+<meta property="og:description" content="Ahorra 10 horas a la semana con IA en 30 días. 30 prompts, 6 automatizaciones y un plan día a día.">
+<meta property="og:image" content="portada.jpg">
+<meta property="og:type" content="product">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --bg:#070A18; --panel:#111633; --panel2:#161C40; --ink:#EAF0FF; --muted:#A3ADCF; --line:#262E5A;
+  --vio:#A855F7; --cyan:#22D3EE; --vio-soft:rgba(168,85,247,.14);
+  --f-brand:"Orbitron","Arial Black",system-ui,sans-serif; --f-body:"Exo 2",system-ui,sans-serif; --f-mono:"JetBrains Mono",ui-monospace,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background-color:var(--bg);color:var(--ink);font:400 17px/1.6 var(--f-body);-webkit-font-smoothing:antialiased;
+  background-image:linear-gradient(rgba(168,85,247,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(168,85,247,.07) 1px,transparent 1px);background-size:48px 48px}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--cyan);outline-offset:3px;border-radius:4px}
+.wrap{max-width:1100px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{margin:0;line-height:1.1;text-wrap:balance}
+h2{font-size:clamp(1.8rem,3.8vw,2.7rem);font-weight:800}
+h3{font-size:1.15rem;font-weight:700}
+p{margin:0}
+.grad{background:linear-gradient(90deg,var(--vio),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+.mono{font:500 .78rem var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}
+.muted{color:var(--muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5em;padding:.95em 1.5em;border-radius:10px;font:700 1.05rem var(--f-body);text-decoration:none;cursor:pointer;
+  border:0;background:linear-gradient(90deg,var(--vio),#7C3AED 45%,var(--cyan));color:#fff;box-shadow:0 0 28px rgba(168,85,247,.35);transition:box-shadow .2s,transform .2s}
+.btn:hover{box-shadow:0 0 36px rgba(34,211,238,.5);transform:translateY(-1px)}
+.btn.ghost{background:rgba(168,85,247,.08);border:1.5px solid rgba(168,85,247,.7);box-shadow:none}
+
+header{position:sticky;top:0;z-index:20;background:rgba(7,10,24,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+header .wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-block:12px}
+.brand{font:800 .9rem var(--f-brand);letter-spacing:.06em;text-transform:uppercase;text-decoration:none;white-space:nowrap}
+header .btn{padding:.55em 1em;font-size:.92rem}
+
+.hero{padding-block:clamp(40px,7vw,90px)}
+.hero .wrap{display:grid;grid-template-columns:1.15fr .85fr;gap:clamp(24px,5vw,64px);align-items:center}
+.hero h1{font:900 clamp(2rem,5vw,3.6rem)/1.04 var(--f-brand);text-transform:uppercase;text-shadow:0 0 30px rgba(168,85,247,.4);margin:.35em 0 .4em}
+.hero .sub{font-size:clamp(1.1rem,2vw,1.35rem);color:#D5DBF2;font-weight:600;max-width:34ch}
+.price{display:flex;align-items:baseline;gap:14px;margin:26px 0 16px;flex-wrap:wrap}
+.price b{font:900 2.6rem var(--f-brand)}
+.price span{color:var(--muted)}
+.trust{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:16px;color:var(--muted);font-size:.92rem}
+.trust span::before{content:"✓ ";color:var(--cyan);font-weight:800}
+.cover{width:100%;height:auto;max-width:400px;justify-self:center;border-radius:10px;box-shadow:0 0 0 1px rgba(168,85,247,.5),0 30px 80px rgba(168,85,247,.35);transform:rotate(2deg)}
+@media (max-width:820px){.hero .wrap{grid-template-columns:1fr}.cover{max-width:280px;grid-row:1}}
+
+section{padding-block:clamp(48px,7vw,88px)}
+.head{display:grid;gap:12px;margin-bottom:36px;max-width:760px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.grid3,.grid2{grid-template-columns:1fr}}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:22px;display:grid;gap:10px;align-content:start}
+.card .n{font:900 1.8rem var(--f-brand);color:var(--vio);text-shadow:0 0 14px rgba(168,85,247,.5)}
+.card p{color:var(--muted)}
+.pain li{margin-bottom:10px}
+.toc{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.toc li{background:rgba(17,22,51,.8);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.toc b{color:var(--cyan);font-family:var(--f-mono);font-weight:500;margin-right:8px}
+.toc small{display:block;color:var(--muted);margin-top:4px}
+@media (max-width:820px){.toc{grid-template-columns:1fr}}
+.quote{border-left:4px solid var(--vio);background:var(--vio-soft);padding:16px 20px;border-radius:8px;font-family:var(--f-mono);font-size:.88rem;color:#E4DAFF}
+.buy{text-align:center;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid rgba(168,85,247,.55);border-radius:18px;padding:clamp(28px,5vw,48px);box-shadow:0 0 40px rgba(168,85,247,.18);display:grid;gap:16px;justify-items:center}
+.buy ul{list-style:none;padding:0;margin:0;display:grid;gap:6px;text-align:left}
+.buy li::before{content:"◆ ";color:var(--cyan)}
+details{background:rgba(17,22,51,.8);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:10px}
+summary{cursor:pointer;font-weight:700}
+details p{margin-top:10px;color:var(--muted)}
+footer{border-top:1px solid var(--line);padding-block:28px;color:var(--muted);font-size:.9rem}
+footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
+.aviso{font-size:.85rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="brand" href="../">Estrateg <span class="grad">IA</span> Digital 3.0</a>
+    <a class="btn js-comprar" href="#comprar">Comprar el ebook</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <p class="mono">Ebook · Guía práctica · PDF</p>
+        <h1>La <span class="grad">IA</span> que trabaja por ti</h1>
+        <p class="sub">Ahorra 10 horas a la semana en tu negocio en 30 días, sin saber de tecnología y con herramientas casi gratis.</p>
+        <div class="price"><b class="js-precio">17 €</b><span>Pago único · descarga inmediata</span></div>
+        <a class="btn js-comprar" href="#comprar">Quiero el ebook →</a>
+        <div class="trust"><span>37 páginas al grano</span><span>30 prompts listos para copiar</span><span>6 automatizaciones paso a paso</span></div>
+      </div>
+      <img class="cover" src="portada.jpg" alt="Portada del ebook La IA que trabaja por ti, con un robot de estilo neón" width="800" height="1200">
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap grid2">
+      <div class="head" style="margin:0">
+        <p class="mono">¿Te suena?</p>
+        <h2>Sabes que la IA te podría ayudar, pero no sabes por dónde empezar</h2>
+      </div>
+      <ul class="pain muted">
+        <li>Pasas horas escribiendo posts, emails y presupuestos que podrías tener en minutos.</li>
+        <li>Respondes las mismas preguntas por WhatsApp una y otra vez, incluso fuera de horario.</li>
+        <li>Has probado ChatGPT y te dio textos genéricos que no suenan a ti.</li>
+        <li>Oyes hablar de «automatizar» y «agentes de IA» y te parece cosa de grandes empresas.</li>
+        <li>Tu competencia publica a diario y responde al momento, y no sabes cómo lo hace.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head">
+        <p class="mono">Qué vas a conseguir</p>
+        <h2>Una guía para <span class="grad">hacer</span>, no para leer y olvidar</h2>
+        <p class="muted">Cada capítulo termina con una acción de menos de 30 minutos. Si haces una al día, en un mes tu negocio trabaja de otra manera.</p>
+      </div>
+      <div class="grid3">
+        <div class="card"><div class="n">30</div><h3>Prompts listos para copiar</h3><p>Marketing, ventas, atención al cliente, administración y estrategia. Cambias lo que va entre corchetes y listo.</p></div>
+        <div class="card"><div class="n">6</div><h3>Automatizaciones sin código</h3><p>Formularios que se responden solos, facturas que se ordenan solas, reseñas automáticas y un resumen diario de tu negocio.</p></div>
+        <div class="card"><div class="n">30</div><h3>Días con un plan claro</h3><p>Una tarea al día, de 15 a 30 minutos. Sabes exactamente qué hacer cada mañana.</p></div>
+        <div class="card"><div class="n">1 h</div><h3>Redes en una hora a la semana</h3><p>El sistema de 4 pilares y la sesión semanal de 60 minutos para tener contenido programado toda la semana.</p></div>
+        <div class="card"><div class="n">24/7</div><h3>Atención al cliente sin estar pegado al móvil</h3><p>WhatsApp Business bien configurado y qué exigir a un asistente de IA antes de contratarlo.</p></div>
+        <div class="card"><div class="n">✓</div><h3>Tranquilidad legal</h3><p>Lo mínimo que debes saber de RGPD y del Reglamento europeo de IA para usarla sin riesgos.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head">
+        <p class="mono">Por dentro</p>
+        <h2>Índice del ebook</h2>
+      </div>
+      <ol class="toc">
+        <li><b>01</b>Por qué ahora (y por qué tú)<small>Qué puede y qué no debe hacer la IA en un negocio pequeño.</small></li>
+        <li><b>02</b>La IA en 10 minutos<small>Las cuatro ideas que necesitas para usarla bien.</small></li>
+        <li><b>03</b>Tu caja de herramientas<small>Las 5 o 6 herramientas que cubren el 90 % de lo que necesitas.</small></li>
+        <li><b>04</b>El arte de pedir: la fórmula C.R.E.A.<small>Cómo conseguir textos que suenan a ti, con tu ficha de negocio.</small></li>
+        <li><b>05</b>30 prompts listos para copiar<small>Para marketing, ventas, atención, gestión y estrategia.</small></li>
+        <li><b>06</b>Contenido para redes en una hora a la semana<small>Pilares, sesión semanal y reciclaje de contenido.</small></li>
+        <li><b>07</b>Atención al cliente 24/7<small>Tres niveles, de WhatsApp Business a un asistente de IA.</small></li>
+        <li><b>08</b>Automatizaciones sin código: 6 recetas<small>Con Zapier, Make o n8n, paso a paso.</small></li>
+        <li><b>09</b>Legal, privacidad y ética<small>RGPD, Reglamento europeo de IA y reputación.</small></li>
+        <li><b>10</b>Tu plan de 30 días<small>Una tarea al día, semana a semana.</small></li>
+        <li><b>11</b>Checklist final y siguiente paso<small>Incluye un diagnóstico gratuito para lectores.</small></li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap grid2" style="align-items:center">
+      <div class="head" style="margin:0">
+        <p class="mono">Una muestra</p>
+        <h2>De «escríbeme un post» a textos que venden</h2>
+        <p class="muted">Así es uno de los 30 prompts del capítulo 5. Copias, rellenas y en un minuto tienes el mes de redes planificado.</p>
+      </div>
+      <p class="quote">Crea un calendario de contenidos para [Instagram] de [mi negocio] para el mes de [mes]. 3 publicaciones por semana. Para cada una indica: día, tipo (carrusel, reel, foto, historia), tema, texto del post y llamada a la acción. Ten en cuenta fechas señaladas del mes en España. Preséntalo en una tabla.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap grid2">
+      <div class="card"><h3>Es para ti si…</h3><p>Tienes una pyme, un comercio, un negocio de servicios o eres autónomo o marca personal. Quieres ahorrar tiempo y vender más con IA, aunque nunca la hayas usado o solo hayas probado ChatGPT un par de veces.</p></div>
+      <div class="card"><h3>No es para ti si…</h3><p>Buscas un curso técnico de programación o de modelos de IA, o esperas que la IA venda sola sin que tú hagas nada. Esto es una guía práctica para aplicar desde el primer día.</p></div>
+    </div>
+  </section>
+
+  <section id="comprar">
+    <div class="wrap">
+      <div class="buy">
+        <p class="mono">Descarga inmediata</p>
+        <h2>La IA que trabaja por ti</h2>
+        <ul>
+          <li>Ebook en PDF de 37 páginas, para leer en móvil, tablet u ordenador</li>
+          <li>30 prompts listos para copiar y pegar</li>
+          <li>6 recetas de automatización paso a paso</li>
+          <li>Plan de 30 días y checklist final</li>
+          <li>Diagnóstico gratuito de tu negocio para lectores</li>
+        </ul>
+        <div class="price" style="margin:6px 0 0;justify-content:center"><b class="js-precio">17 €</b><span>IVA incluido · pago único</span></div>
+        <a class="btn js-comprar" id="btn-comprar" href="#comprar">Comprar y descargar →</a>
+        <p class="aviso js-aviso">Pago seguro. Recibirás el PDF en tu email al momento.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap" style="max-width:820px">
+      <div class="head"><p class="mono">Dudas</p><h2>Preguntas frecuentes</h2></div>
+      <details><summary>¿Cómo recibo el ebook?</summary><p>Justo después del pago te llega un email con el enlace de descarga del PDF. También puedes descargarlo desde la página de confirmación.</p></details>
+      <details><summary>¿Necesito saber de tecnología?</summary><p>No. Está escrito para personas que nunca han usado la IA o que la han probado sin sacarle partido. Todo se explica paso a paso y sin tecnicismos.</p></details>
+      <details><summary>¿Tengo que pagar herramientas caras?</summary><p>No. Casi todo lo que se explica funciona con las versiones gratuitas de las herramientas. Cuando algo es de pago, se indica.</p></details>
+      <details><summary>¿Sirve para mi sector?</summary><p>Sí, si tienes clientes. Los ejemplos incluyen comercios, hostelería, clínicas, servicios profesionales y tiendas online, y los prompts se adaptan a cualquier negocio.</p></details>
+      <details><summary>¿Puedo pedir factura?</summary><p>Sí. Al pagar puedes indicar tus datos y recibirás la factura por email.</p></details>
+      <details><summary>¿Y si quiero que me lo montéis vosotros?</summary><p>El ebook incluye un diagnóstico gratuito. Si después quieres que instalemos los agentes y automatizaciones por ti, <a href="../#contacto">cuéntanos tu proyecto</a>.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Estrateg IA Digital 3.0</span>
+    <a href="../">Volver a la web</a>
+  </div>
+</footer>
+
+<script>
+/* CONFIG: lo único que hay que tocar para vender.
+   checkoutUrl: enlace de pago (Gumroad, Stripe Payment Link, Lemon Squeezy o Shopify).
+   Mientras esté vacío, los botones llevan al formulario de contacto de la web. */
+const CONFIG = {
+  checkoutUrl: "",
+  precio: "17 €",
+  email: ""
+};
+(function(){
+  document.querySelectorAll(".js-precio").forEach(el => el.textContent = CONFIG.precio);
+  const destino = CONFIG.checkoutUrl || "#comprar";
+  document.querySelectorAll(".js-comprar").forEach(a => {
+    if (a.id === "btn-comprar" && !CONFIG.checkoutUrl) {
+      a.href = CONFIG.email ? "mailto:" + CONFIG.email + "?subject=Quiero%20el%20ebook%20La%20IA%20que%20trabaja%20por%20ti" : "../#contacto";
+      a.textContent = "Reservar mi copia →";
+      document.querySelector(".js-aviso").textContent = "La tienda se abre en breve. Déjanos tus datos y te enviamos el enlace de compra.";
+    } else {
+      a.href = destino;
+    }
+  });
+})();
+</script>
+</body>
+</html>
