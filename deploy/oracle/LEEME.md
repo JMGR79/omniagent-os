@@ -3,7 +3,20 @@
 Servidor «Always Free» de Oracle (Ampere A1: 4 núcleos, 24 GB de RAM) con n8n, Postgres y HTTPS
 (Caddy). GitHub lo despliega solo en cada fusión a `main`.
 
-## 1. Crear la máquina (consola de Oracle)
+## 1. Crear la máquina
+
+**Opción rápida (recomendada):** en la consola de Oracle abre **Cloud Shell** (icono `>_` arriba a la
+derecha) y pega:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/JMGR79/omniagent-os/main/deploy/oracle/crear-maquina.sh)
+```
+
+Crea la red, abre los puertos, genera la clave SSH y crea la máquina. Si Oracle responde «Out of host
+capacity» (muy habitual en la capa gratuita), lo reintenta solo en todas las zonas y con tamaños más
+pequeños hasta conseguirla. Al final muestra la IP y la clave para los secretos del paso 2.
+
+**Opción manual (consola de Oracle):**
 
 1. **Compute → Instances → Create instance**, nombre `omniagent`.
 2. **Image**: Canonical Ubuntu 24.04. **Shape**: Ampere → `VM.Standard.A1.Flex`, 4 OCPU y 24 GB.
