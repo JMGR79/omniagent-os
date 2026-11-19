@@ -85,8 +85,10 @@ fi
 echo "  Red lista"
 
 # ---------- 2. Clave SSH ----------
-if [ ! -f "$CLAVE" ]; then
-  ssh-keygen -q -t ed25519 -N "" -C omniagent -f "$CLAVE"
+# RSA: Cloud Shell usa modo FIPS y no acepta claves ED25519
+if [ ! -f "$CLAVE" ] || [ ! -f "$CLAVE.pub" ]; then
+  rm -f "$CLAVE" "$CLAVE.pub"
+  ssh-keygen -q -t rsa -b 4096 -N "" -C omniagent -f "$CLAVE" || error "No pude crear la clave SSH"
   di "Clave SSH creada en $CLAVE"
 fi
 
