@@ -37,9 +37,24 @@ jobs:
           echo "$RESPUESTA" | grep -Eq '^https://[A-Za-z0-9.-]+/webhook-waiting/[0-9]+(\?signature=[A-Za-z0-9._~%-]+)?$' || { echo "URL de entrega no válida"; exit 1; }
 
       - name: Instalar ffmpeg y la fuente
+        timeout-minutes: 6
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core > /dev/null
+          # ffmpeg estático publicado en GitHub (rápido); apt solo como respaldo, que a veces se queda colgado
+          URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
+          if curl -fsSL --retry 3 --max-time 180 "$URL" -o "$RUNNER_TEMP/ffmpeg.tar.xz"; then
+            mkdir -p "$RUNNER_TEMP/ffmpeg"
+            tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
+            echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
+            "$RUNNER_TEMP/ffmpeg/bin/ffmpeg" -hide_banner -version | head -n 1
+          else
+            echo "No se pudo descargar ffmpeg estático; se instala con apt"
+            timeout 240 sudo apt-get update -qq
+            timeout 240 sudo apt-get install -y -qq ffmpeg > /dev/null
+          fi
+          if [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ]; then
+            timeout 120 sudo apt-get update -qq || true
+            timeout 120 sudo apt-get install -y -qq fonts-dejavu-core > /dev/null
+          fi
 
       - name: Montar el vídeo
         env:
@@ -51,18 +66,21 @@ jobs:
           OMNI_MONTAJE_SALIDA: ${{ runner.temp }}/video.mp4
         run: node scripts/montar.mjs "$TRABAJO"
 
-      - name: Publicar el vídeo en la release «videos»
+      - name: Publicar el vídeo como release propia
         id: publicar
         env:
           GH_TOKEN: ${{ github.token }}
           VIDEO: ${{ runner.temp }}/video.mp4
         run: |
           # El vídeo se guarda en GitHub (público, como cualquier vídeo para redes) y a OmniAgent solo le llega el enlace.
-          gh release view videos > /dev/null 2>&1 || gh release create videos --title "Vídeos de OmniAgent" --notes "Vídeos montados automáticamente por OmniAgent."
-          NOMBRE="video-${{ github.run_id }}-${{ github.run_attempt }}.mp4"
+          # Las releases de GitHub son inmutables una vez publicadas (no admiten archivos nuevos), así que cada vídeo
+          # va en su propia release, creada ya con el archivo dentro.
+          ETIQUETA="video-${{ github.run_id }}-${{ github.run_attempt }}"
+          NOMBRE="$ETIQUETA.mp4"
           cp "$VIDEO" "${{ runner.temp }}/$NOMBRE"
-          gh release upload videos "${{ runner.temp }}/$NOMBRE" --clobber
-          echo "url=https://github.com/${{ github.repository }}/releases/download/videos/$NOMBRE" >> "$GITHUB_OUTPUT"
+          gh release create "$ETIQUETA" "${{ runner.temp }}/$NOMBRE" \
+            --title "Vídeo de OmniAgent $ETIQUETA" --notes "Vídeo montado automáticamente por OmniAgent." --latest=false
+          echo "url=https://github.com/${{ github.repository }}/releases/download/$ETIQUETA/$NOMBRE" >> "$GITHUB_OUTPUT"
 
       - name: Entregar el enlace a OmniAgent
         env:
