@@ -277,6 +277,25 @@ return [{ json: { proveedor: prov, modelo, version: p.version, url, cabeceras, c
             "sendHeaders": True, "specifyHeaders": "json", "jsonHeaders": "={{ JSON.stringify($json.cabeceras) }}",
             "sendBody": True, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.cuerpo) }}",
             "options": {"timeout": 120000}}, (880, 100),
+            retryOnFail=True, maxTries=4, waitBetweenTries=5000, onError="continueErrorOutput"),
+        code("Modelo de respaldo", r"""
+// Si Gemini está saturado (503, sobrecarga, tiempo agotado), se reintenta con otro modelo de la misma familia.
+const prep = $('Preparar llamada').first().json;
+const fallo = JSON.stringify($input.first().json.error || $input.first().json).slice(0, 600);
+const transitorio = /(50[0234]|overload|unavailable|timeout|timed out|ECONNRESET|ETIMEDOUT|socket hang up|try again)/i.test(fallo);
+if (prep.proveedor !== 'gemini' || !transitorio) throw new Error('El modelo de IA falló: ' + fallo);
+const respaldo = $env.MODELO_IA_RESPALDO || (/lite/.test(prep.modelo) ? 'gemini-3.5-flash' : 'gemini-3.5-flash-lite');
+if (respaldo === prep.modelo) throw new Error('El modelo de IA falló y no hay otro de respaldo: ' + fallo);
+const cuerpo = JSON.parse(JSON.stringify(prep.cuerpo));
+if (!/^gemini-([3-9]|\d\d)/.test(respaldo)) delete cuerpo.generationConfig.thinkingConfig;
+const url = prep.url.replace(/models\/[^:]+:/, 'models/' + encodeURIComponent(respaldo) + ':');
+return [{ json: { ...prep, modelo: respaldo, url, cuerpo } }];
+""", (880, 300)),
+        nodo("IA de respaldo", "n8n-nodes-base.httpRequest", 4.2, {
+            "method": "POST", "url": "={{ $json.url }}",
+            "sendHeaders": True, "specifyHeaders": "json", "jsonHeaders": "={{ JSON.stringify($json.cabeceras) }}",
+            "sendBody": True, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.cuerpo) }}",
+            "options": {"timeout": 120000}}, (1100, 300),
             retryOnFail=True, maxTries=3, waitBetweenTries=5000),
         code("Calcular coste", r"""
 const r = $input.first().json;
@@ -298,7 +317,9 @@ if (!texto) throw new Error('El modelo (' + prep.proveedor + ') no devolvió tex
 // Precios orientativos en EUR por millón de tokens; ajústalos con variables de entorno.
 const pe = parseFloat($env.PRECIO_ENTRADA_EUR_MTOK || '3'), ps = parseFloat($env.PRECIO_SALIDA_EUR_MTOK || '15');
 const coste = Math.round(((ent * pe + sal * ps) / 1e6) * 10000) / 10000;
-return [{ json: { respuesta: texto, agente_id: n.agente_id, version: prep.version, modelo: prep.proveedor + ':' + prep.modelo,
+let usado = prep.modelo;
+try { if ($('Modelo de respaldo').isExecuted) usado = $('Modelo de respaldo').first().json.modelo; } catch (e) {}
+return [{ json: { respuesta: texto, agente_id: n.agente_id, version: prep.version, modelo: prep.proveedor + ':' + usado,
   tokens_entrada: ent, tokens_salida: sal, coste_eur: coste, origen: n.origen, cortado } }];
 """, (1100, 100)),
         pg("Registrar ejecución", """
@@ -314,6 +335,8 @@ return [{ json: { respuesta: c.respuesta, agente_id: c.agente_id, coste_eur: c.c
     c = enlazar(("Desde otro flujo", "Normalizar"), ("Webhook agente", "Normalizar"),
                 ("Normalizar", "Prompt activo"), ("Prompt activo", "Preparar llamada"),
                 ("Preparar llamada", "Modelo de IA"), ("Modelo de IA", "Calcular coste"),
+                ("Modelo de IA", "Modelo de respaldo", 1), ("Modelo de respaldo", "IA de respaldo"),
+                ("IA de respaldo", "Calcular coste"),
                 ("Calcular coste", "Registrar ejecución"), ("Registrar ejecución", "Respuesta"))
     return flujo("AGT00", "AGT-00 Ejecutar agente", n, c)
 
@@ -827,7 +850,9 @@ const msg = String(e.execution?.error?.message || e.trigger?.error?.message || '
 // Tampoco se reintenta una ejecución que ya era un reintento (evita la cascada de incidentes).
 const esReintento = !!(e.execution?.retryOf);
 const noReintentable = esReintento || /(No autorizado|credential|credencial|permission|permiso|Presupuesto|401|403|429|quota|cuota|rate.?limit|too many requests|exceeded|invalid|no válido)/i.test(msg);
-return [{ json: { params: [e.workflow?.name || 'desconocido', String(e.workflow?.id || ''), String(e.execution?.id || ''),
+// Fallos pasajeros (servicio saturado, tiempo agotado): se reintentan en silencio; solo se avisa si el reintento también falla.
+const pasajero = !noReintentable && /(50[0234]|service unavailable|overload|unavailable|timeout|timed out|ECONNRESET|ETIMEDOUT|socket hang up|try again)/i.test(msg);
+return [{ json: { avisar: !pasajero, params: [e.workflow?.name || 'desconocido', String(e.workflow?.id || ''), String(e.execution?.id || ''),
   e.execution?.lastNodeExecuted || '', msg.slice(0, 2000), noReintentable ? 'no' : 'si'],
   aviso: '🛠 Error en ' + (e.workflow?.name || 'un flujo') + ' · nodo «' + (e.execution?.lastNodeExecuted || '?') + '»\n' + msg.slice(0, 800) +
     (noReintentable ? '\n\nNo se reintentará solo: revisa la configuración.' : '\n\nSe reintentará automáticamente.') } }];
@@ -837,7 +862,9 @@ INSERT INTO incidentes (workflow, workflow_id, ejecucion_id, nodo, error, proxim
 VALUES ($1, $2, nullif($3, ''), $4, $5, CASE WHEN $6 = 'si' THEN now() + interval '5 minutes' END) RETURNING id
 """, "={{ $json.params }}", (440, 0), onError="continueRegularOutput"),
         code("Aviso", AVISO_TG + r"""
-return avisoTelegram($('Extraer').first().json.aviso);
+const x = $('Extraer').first().json;
+if (!x.avisar) return [];
+return avisoTelegram(x.aviso);
 """, (660, 0)),
     ]
     c = enlazar(("Error en un flujo", "Extraer"), ("Extraer", "Guardar incidente"),
