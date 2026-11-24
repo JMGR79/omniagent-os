@@ -104,12 +104,52 @@
         100
       ],
       "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Si Gemini está saturado (503, sobrecarga, tiempo agotado), se reintenta con otro modelo de la misma familia.\nconst prep = $('Preparar llamada').first().json;\nconst fallo = JSON.stringify($input.first().json.error || $input.first().json).slice(0, 600);\nconst transitorio = /(50[0234]|overload|unavailable|timeout|timed out|ECONNRESET|ETIMEDOUT|socket hang up|try again)/i.test(fallo);\nif (prep.proveedor !== 'gemini' || !transitorio) throw new Error('El modelo de IA falló: ' + fallo);\nconst respaldo = $env.MODELO_IA_RESPALDO || (/lite/.test(prep.modelo) ? 'gemini-3.5-flash' : 'gemini-3.5-flash-lite');\nif (respaldo === prep.modelo) throw new Error('El modelo de IA falló y no hay otro de respaldo: ' + fallo);\nconst cuerpo = JSON.parse(JSON.stringify(prep.cuerpo));\nif (!/^gemini-([3-9]|\\d\\d)/.test(respaldo)) delete cuerpo.generationConfig.thinkingConfig;\nconst url = prep.url.replace(/models\\/[^:]+:/, 'models/' + encodeURIComponent(respaldo) + ':');\nreturn [{ json: { ...prep, modelo: respaldo, url, cuerpo } }];\n"
+      },
+      "id": "c388b743-5dc9-5fd9-9cf4-bed3cb07b4f0",
+      "name": "Modelo de respaldo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.cabeceras) }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cuerpo) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "17a4fff9-b630-55f8-ac6e-27a15df51efb",
+      "name": "IA de respaldo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ],
+      "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nconst prep = $('Preparar llamada').first().json;\nconst n = $('Normalizar').first().json;\nlet texto = '', ent = 0, sal = 0, cortado = false;\nif (prep.proveedor === 'anthropic') {\n  texto = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\\n');\n  ent = r.usage?.input_tokens || 0; sal = r.usage?.output_tokens || 0; cortado = r.stop_reason === 'max_tokens';\n} else if (prep.proveedor === 'openai') {\n  texto = r.choices?.[0]?.message?.content || '';\n  ent = r.usage?.prompt_tokens || 0; sal = r.usage?.completion_tokens || 0; cortado = r.choices?.[0]?.finish_reason === 'length';\n} else {\n  texto = (r.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');\n  ent = r.usageMetadata?.promptTokenCount || 0; sal = r.usageMetadata?.candidatesTokenCount || 0; cortado = r.candidates?.[0]?.finishReason === 'MAX_TOKENS';\n}\ntexto = String(texto).trim();\nif (!texto) throw new Error('El modelo (' + prep.proveedor + ') no devolvió texto: ' + JSON.stringify(r).slice(0, 300));\n// Precios orientativos en EUR por millón de tokens; ajústalos con variables de entorno.\nconst pe = parseFloat($env.PRECIO_ENTRADA_EUR_MTOK || '3'), ps = parseFloat($env.PRECIO_SALIDA_EUR_MTOK || '15');\nconst coste = Math.round(((ent * pe + sal * ps) / 1e6) * 10000) / 10000;\nreturn [{ json: { respuesta: texto, agente_id: n.agente_id, version: prep.version, modelo: prep.proveedor + ':' + prep.modelo,\n  tokens_entrada: ent, tokens_salida: sal, coste_eur: coste, origen: n.origen, cortado } }];\n"
+        "jsCode": "const r = $input.first().json;\nconst prep = $('Preparar llamada').first().json;\nconst n = $('Normalizar').first().json;\nlet texto = '', ent = 0, sal = 0, cortado = false;\nif (prep.proveedor === 'anthropic') {\n  texto = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\\n');\n  ent = r.usage?.input_tokens || 0; sal = r.usage?.output_tokens || 0; cortado = r.stop_reason === 'max_tokens';\n} else if (prep.proveedor === 'openai') {\n  texto = r.choices?.[0]?.message?.content || '';\n  ent = r.usage?.prompt_tokens || 0; sal = r.usage?.completion_tokens || 0; cortado = r.choices?.[0]?.finish_reason === 'length';\n} else {\n  texto = (r.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');\n  ent = r.usageMetadata?.promptTokenCount || 0; sal = r.usageMetadata?.candidatesTokenCount || 0; cortado = r.candidates?.[0]?.finishReason === 'MAX_TOKENS';\n}\ntexto = String(texto).trim();\nif (!texto) throw new Error('El modelo (' + prep.proveedor + ') no devolvió texto: ' + JSON.stringify(r).slice(0, 300));\n// Precios orientativos en EUR por millón de tokens; ajústalos con variables de entorno.\nconst pe = parseFloat($env.PRECIO_ENTRADA_EUR_MTOK || '3'), ps = parseFloat($env.PRECIO_SALIDA_EUR_MTOK || '15');\nconst coste = Math.round(((ent * pe + sal * ps) / 1e6) * 10000) / 10000;\nlet usado = prep.modelo;\ntry { if ($('Modelo de respaldo').isExecuted) usado = $('Modelo de respaldo').first().json.modelo; } catch (e) {}\nreturn [{ json: { respuesta: texto, agente_id: n.agente_id, version: prep.version, modelo: prep.proveedor + ':' + usado,\n  tokens_entrada: ent, tokens_salida: sal, coste_eur: coste, origen: n.origen, cortado } }];\n"
       },
       "id": "64819d56-7dd5-5361-982d-1ded6b38df2b",
       "name": "Calcular coste",
@@ -214,6 +254,35 @@
       ]
     },
     "Modelo de IA": {
+      "main": [
+        [
+          {
+            "node": "Calcular coste",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Modelo de respaldo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo de respaldo": {
+      "main": [
+        [
+          {
+            "node": "IA de respaldo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA de respaldo": {
       "main": [
         [
           {
